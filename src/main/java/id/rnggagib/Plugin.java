@@ -96,6 +96,16 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   boolean dlEnabled = getConfig().getBoolean("features.native.auto-download.enabled", false);
   String dlUrl = getConfig().getString("features.native.auto-download.url", "");
   String dlSha = getConfig().getString("features.native.auto-download.sha256", "");
+  // Auto-pick per-OS URL/SHA if url is empty
+  if (dlEnabled && (dlUrl == null || dlUrl.isBlank())) {
+    String os = System.getProperty("os.name", "").toLowerCase();
+    String key = os.contains("win") ? "windows" : (os.contains("mac") || os.contains("darwin") ? "macos" : "linux");
+    String base = "features.native.auto-download.per-os." + key + ".";
+    String kUrl = getConfig().getString(base + "url", "");
+    String kSha = getConfig().getString(base + "sha256", "");
+    if (kUrl != null && !kUrl.isBlank()) dlUrl = kUrl;
+    if (kSha != null && !kSha.isBlank()) dlSha = kSha;
+  }
   nativeBridge.tryLoad(nativeEnabled, libPath, dlEnabled, dlUrl, dlSha);
 
   // Culling module
@@ -161,6 +171,15 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
       boolean dlEnabled = getConfig().getBoolean("features.native.auto-download.enabled", false);
       String dlUrl = getConfig().getString("features.native.auto-download.url", "");
       String dlSha = getConfig().getString("features.native.auto-download.sha256", "");
+      if (dlEnabled && (dlUrl == null || dlUrl.isBlank())) {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        String key = os.contains("win") ? "windows" : (os.contains("mac") || os.contains("darwin") ? "macos" : "linux");
+        String base = "features.native.auto-download.per-os." + key + ".";
+        String kUrl = getConfig().getString(base + "url", "");
+        String kSha = getConfig().getString(base + "sha256", "");
+        if (kUrl != null && !kUrl.isBlank()) dlUrl = kUrl;
+        if (kSha != null && !kSha.isBlank()) dlSha = kSha;
+      }
       nativeBridge.tryLoad(nativeEnabled, libPath, dlEnabled, dlUrl, dlSha);
     }
     if (cullingService != null) {
