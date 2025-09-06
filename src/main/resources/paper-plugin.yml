@@ -1,0 +1,17 @@
+name: gatotkacas
+version: 0.1.0
+main: id.rnggagib.Plugin
+description: Modern performance toolkit with MiniMessage and reloadable config
+api-version: '1.21'
+folia-supported: false
+website: https://example.com
+authors:
+  - rnggagib
+
+permissions:
+  gatotkacas.use:
+    default: op
+    description: Use /gatotkacas
+  gatotkacas.reload:
+    default: op
+    description: Reload plugin configuration

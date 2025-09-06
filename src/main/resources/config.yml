@@ -1,0 +1,66 @@
+# Default configuration for gatotkacas
+# MiniMessage format is used for all messages
+messages:
+  usage: "<gray>/gatotkacas <yellow>[reload|info]</yellow></gray>"
+  no-permission: "<red>No permission.</red>"
+  reloaded: "<green>Configuration reloaded.</green>"
+  info: "<gray>Running <green>gatotkacas</green> v<version></gray> | <gray>tick:<green><culled></green>/<green><processed></green> (<green><ratio></green>)</gray> | <gray>window:<green><wculled></green>/<green><wprocessed></green> (<green><wratio></green>)</gray>"
+
+features:
+  native:
+    enabled: true
+    # kosongkan untuk auto-pick sesuai OS di plugins/gatotkacas/natives/<nama>
+    # atau isi path relatif terhadap folder plugin (plugins/gatotkacas/)
+    # Contoh Linux yang benar (relatif): "natives/libculling_rs.so"
+    library: ""
+    auto-download:
+      enabled: false
+      url: ""
+      sha256: ""
+  culling:
+    enabled: true
+    max-distance: 48.0
+    speed-threshold: 0.05
+    cos-angle-threshold: 0.25
+    interval-ticks: 20
+    max-entities-per-tick: 512
+    metrics: true
+    frustum-approx: false
+    whitelist: []
+    blacklist: ["PLAYER", "ARMOR_STAND", "ITEM_FRAME"]
+    ratio-percent: true
+    alarm-enabled: false
+    alarm-threshold: 0.50
+    alarm-cooldown-seconds: 30
+    window-seconds: 60
+    worlds-include: []
+    worlds-exclude: []
+    chunk-radius: 0
+  # Optional per-entity-type thresholds overriding global values
+  # Example:
+  # type-thresholds:
+  #   ZOMBIE:
+  #     max-distance: 40.0
+  #     speed-threshold: 0.05
+  #     cos-angle-threshold: 0.25
+  type-thresholds: {}
+
+# Small server-side tweaks
+tweaks:
+  enabled: true
+  hopper:
+    throttle-enabled: false
+    interval-ticks: 8
+  item:
+    aggressive-merge-enabled: false
+    merge-radius: 1.5
+    max-merge-per-tick: 128
+  # Optional per-world tracking range hints (blocks); 0 to ignore
+  tracking-range-per-world: {}
+
+monitor:
+  window-ticks: 1200
+  report:
+    enabled: false
+    period-seconds: 15
+    path: reports/status.json
