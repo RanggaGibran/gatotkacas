@@ -43,4 +43,17 @@ public final class NativeCulling {
         double[] typeCosAngleThreshold,
         boolean[] outFlags
     );
+
+    // DirectByteBuffer variant to reduce array copies across JNI.
+    // Buffers must be direct; outFlags is a byte buffer where 0=false, 1=true.
+    public static native void shouldCullBatchIntoDirect(
+        java.nio.ByteBuffer distancesDoubles,
+        java.nio.ByteBuffer speedsDoubles,
+        java.nio.ByteBuffer cosAnglesDoubles,
+        java.nio.ByteBuffer outFlagsBytes,
+        int count,
+        double maxDistance,
+        double speedThreshold,
+        double cosAngleThreshold
+    );
 }

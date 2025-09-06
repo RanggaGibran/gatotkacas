@@ -22,7 +22,6 @@ features:
       url: ""
       sha256: ""
       # Optional per-OS URLs (picked automatically when url is empty)
-      # Fill only the OS you target; others can stay empty.
       per-os:
         windows:
           url: ""
@@ -40,6 +39,8 @@ features:
     cos-angle-threshold: 0.25
     interval-ticks: 20
     max-entities-per-tick: 512
+    compute-timeout-ms: 75
+    use-direct-buffers: true
     metrics: true
     frustum-approx: false
     whitelist: []

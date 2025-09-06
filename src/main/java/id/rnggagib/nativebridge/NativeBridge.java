@@ -50,7 +50,7 @@ public final class NativeBridge {
             }
             if (!libFile.exists()) {
                 if (downloadEnabled && downloadUrl != null && !downloadUrl.isBlank()) {
-                    if (!attemptDownload(libFile, downloadUrl, sha256)) {
+                    if (!attemptDownloadWithRetry(libFile, downloadUrl, sha256, 2)) {
                         logger.warn("Native library download failed; continuing with Java fallback");
                         return;
                     }
@@ -73,6 +73,13 @@ public final class NativeBridge {
         return loaded;
     }
 
+    public void disable() {
+        if (loaded) {
+            logger.warn("Disabling native bridge; Java fallback will be used");
+        }
+        loaded = false;
+    }
+
     private boolean attemptDownload(File target, String url, String sha256) {
         try {
             var client = HttpClient.newHttpClient();
@@ -86,6 +93,10 @@ public final class NativeBridge {
                         logger.warn("SHA-256 mismatch for downloaded native. expected={}, got={}", sha256, got);
                         return false;
                     }
+                }
+                if (body.length < 16 * 1024) {
+                    logger.warn("Downloaded native size looks too small ({} bytes); aborting", body.length);
+                    return false;
                 }
                 if (target.getParentFile() != null && !target.getParentFile().exists()) {
                     target.getParentFile().mkdirs();
@@ -101,6 +112,15 @@ public final class NativeBridge {
             logger.warn("Error downloading native library: {}", e.toString());
             return false;
         }
+    }
+
+    private boolean attemptDownloadWithRetry(File target, String url, String sha256, int retries) {
+        int attempts = retries + 1;
+        for (int i = 1; i <= attempts; i++) {
+            if (attemptDownload(target, url, sha256)) return true;
+            try { Thread.sleep(500L * i); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); return false; }
+        }
+        return false;
     }
 
     private static String hashSha256Hex(byte[] data) {

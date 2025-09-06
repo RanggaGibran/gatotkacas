@@ -1,5 +1,7 @@
-use jni::objects::{JBooleanArray, JClass, JDoubleArray};
+use jni::objects::{JBooleanArray, JClass, JDoubleArray, JByteBuffer};
 use jni::sys::{jboolean, jbooleanArray, jdoubleArray, jintArray};
+use jni::objects::{JObject};
+use jni::sys::{jobject, jint, jdouble};
 use jni::JNIEnv;
 
 #[no_mangle]
@@ -180,3 +182,59 @@ pub extern "system" fn Java_id_rnggagib_nativebridge_NativeCulling_shouldCullBat
     }
     let _ = env.set_boolean_array_region(&out_flags, 0, &out);
 }
+
+// DirectByteBuffer variant: inputs are direct ByteBuffers with f64 data; out is direct ByteBuffer of u8 flags (0/1)
+#[no_mangle]
+pub extern "system" fn Java_id_rnggagib_nativebridge_NativeCulling_shouldCullBatchIntoDirect(
+    env: JNIEnv,
+    _class: JClass,
+    distances_buf: jobject,
+    speeds_buf: jobject,
+    cos_buf: jobject,
+    out_buf: jobject,
+    count: jint,
+    max_distance: jdouble,
+    speed_threshold: jdouble,
+    cos_angle_threshold: jdouble,
+) {
+    let cnt = if count <= 0 { return; } else { count as usize };
+    // Safety: Treat ByteBuffers as raw byte slices, then reinterpret as f64
+    let distances_obj = unsafe { JObject::from_raw(distances_buf) };
+    let speeds_obj = unsafe { JObject::from_raw(speeds_buf) };
+    let cos_obj = unsafe { JObject::from_raw(cos_buf) };
+    let out_obj = unsafe { JObject::from_raw(out_buf) };
+
+    let distances_bb: JByteBuffer = distances_obj.into();
+    let speeds_bb: JByteBuffer = speeds_obj.into();
+    let cos_bb: JByteBuffer = cos_obj.into();
+    let out_bb: JByteBuffer = out_obj.into();
+
+    let distances_ptr = match env.get_direct_buffer_address(&distances_bb) { Ok(p) => p, Err(_) => return };
+    let speeds_ptr = match env.get_direct_buffer_address(&speeds_bb) { Ok(p) => p, Err(_) => return };
+    let cos_ptr = match env.get_direct_buffer_address(&cos_bb) { Ok(p) => p, Err(_) => return };
+    let out_ptr = match env.get_direct_buffer_address(&out_bb) { Ok(p) => p, Err(_) => return };
+
+    let distances_cap = match env.get_direct_buffer_capacity(&distances_bb) { Ok(c) => c as usize, Err(_) => return };
+    let speeds_cap = match env.get_direct_buffer_capacity(&speeds_bb) { Ok(c) => c as usize, Err(_) => return };
+    let cos_cap = match env.get_direct_buffer_capacity(&cos_bb) { Ok(c) => c as usize, Err(_) => return };
+    let out_cap = match env.get_direct_buffer_capacity(&out_bb) { Ok(c) => c as usize, Err(_) => return };
+
+    let need_dbytes = cnt * std::mem::size_of::<f64>();
+    if distances_cap < need_dbytes || speeds_cap < need_dbytes || cos_cap < need_dbytes || out_cap < cnt {
+        return;
+    }
+
+    let distances: &[f64] = unsafe { std::slice::from_raw_parts(distances_ptr as *const f64, cnt) };
+    let speeds: &[f64] = unsafe { std::slice::from_raw_parts(speeds_ptr as *const f64, cnt) };
+    let cos: &[f64] = unsafe { std::slice::from_raw_parts(cos_ptr as *const f64, cnt) };
+    let out: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u8, cnt) };
+
+    let md = max_distance as f64;
+    let st = speed_threshold as f64;
+    let ct = cos_angle_threshold as f64;
+    for i in 0..cnt {
+        let cull = distances[i] > md && speeds[i] < st && cos[i] < ct;
+        out[i] = if cull { 1 } else { 0 };
+    }
+}
+ 

@@ -25,6 +25,7 @@ public final class CullingService {
     private int taskId = -1;
     private ExecutorService worker; // single-threaded async precompute
     private Future<ComputationResult> inFlight;
+    private long inFlightSubmitNano = 0L;
 
     // Configurable params
     private boolean enabled;
@@ -33,6 +34,7 @@ public final class CullingService {
     private double cosAngleThreshold;
     private int intervalTicks;
     private int maxEntitiesPerTick;
+    private long computeTimeoutMs;
     private boolean metrics;
     private boolean frustumApprox;
     private boolean ratioPercent;
@@ -51,6 +53,12 @@ public final class CullingService {
     private double[] bufCos;
     private boolean[] bufOut;
     private int[] bufTypeCodes;
+    // Direct buffers (optional fast path w/ JNI)
+    private boolean useDirectBuffers = true;
+    private java.nio.ByteBuffer dbufDistances;
+    private java.nio.ByteBuffer dbufSpeeds;
+    private java.nio.ByteBuffer dbufCos;
+    private java.nio.ByteBuffer dbufOut;
 
     // Metrics
     private int lastCulledCount = 0;
@@ -76,9 +84,11 @@ public final class CullingService {
         maxDistance = cfg.getDouble("features.culling.max-distance", 48.0);
         speedThreshold = cfg.getDouble("features.culling.speed-threshold", 0.05);
         cosAngleThreshold = cfg.getDouble("features.culling.cos-angle-threshold", 0.25);
-        intervalTicks = cfg.getInt("features.culling.interval-ticks", 20);
+    intervalTicks = cfg.getInt("features.culling.interval-ticks", 20);
         maxEntitiesPerTick = cfg.getInt("features.culling.max-entities-per-tick", 512);
+    computeTimeoutMs = Math.max(10L, cfg.getLong("features.culling.compute-timeout-ms", 75L));
     metrics = cfg.getBoolean("features.culling.metrics", true);
+    useDirectBuffers = cfg.getBoolean("features.culling.use-direct-buffers", true);
     frustumApprox = cfg.getBoolean("features.culling.frustum-approx", false);
     ratioPercent = cfg.getBoolean("features.culling.ratio-percent", true);
     alarmEnabled = cfg.getBoolean("features.culling.alarm-enabled", false);
@@ -155,7 +165,7 @@ public final class CullingService {
         int culledThisTick = 0;
         int processedThisTick = 0;
         int nowSec = (int) (System.currentTimeMillis() / 1000L);
-        if (inFlight != null && inFlight.isDone()) {
+    if (inFlight != null && inFlight.isDone()) {
             try {
                 var res = inFlight.get();
                 // Apply results (main thread)
@@ -184,12 +194,25 @@ public final class CullingService {
             } finally {
                 inFlight = null; // clear slot
             }
+        } else if (inFlight != null && computeTimeoutMs > 0) {
+            long elapsedMs = (System.nanoTime() - inFlightSubmitNano) / 1_000_000L;
+            if (elapsedMs > computeTimeoutMs) {
+                try { inFlight.cancel(true); } catch (Throwable ignored) {}
+                inFlight = null;
+                if (nativeBridge.isLoaded()) {
+                    logger.warn("Culling worker timeout ({} ms > {} ms); disabling native path and falling back to Java", elapsedMs, computeTimeoutMs);
+                    try { nativeBridge.disable(); } catch (Throwable ignored) {}
+                } else {
+                    logger.warn("Culling worker timeout ({} ms > {} ms)", elapsedMs, computeTimeoutMs);
+                }
+            }
         }
 
         // 2) If no computation running, build snapshot and dispatch one
         if (inFlight == null && worker != null) {
             var snapshot = buildSnapshot(maxEntitiesPerTick);
             if (snapshot != null && !snapshot.entities.isEmpty() && !snapshot.players.isEmpty()) {
+                inFlightSubmitNano = System.nanoTime();
                 inFlight = worker.submit(() -> compute(snapshot));
             }
         }
@@ -314,22 +337,33 @@ public final class CullingService {
         }
 
         boolean[] culls;
-        if (nativeBridge.isLoaded()) {
+    if (nativeBridge.isLoaded()) {
             try {
-                // Ensure buffers are large enough
-                if (bufDistances == null || bufDistances.length < n) {
-                    int cap = Math.max(1024, Integer.highestOneBit(n - 1) << 1);
-                    bufDistances = new double[cap];
-                    bufSpeeds = new double[cap];
-                    bufCos = new double[cap];
-                    bufOut = new boolean[cap];
-                    bufTypeCodes = new int[cap];
-                }
-                System.arraycopy(distances, 0, bufDistances, 0, n);
-                System.arraycopy(speeds, 0, bufSpeeds, 0, n);
-                System.arraycopy(cosAngles, 0, bufCos, 0, n);
-
-                if (!typeThresholds.isEmpty()) {
+                // Direct path (only when no per-type thresholds)
+                if (useDirectBuffers && typeThresholds.isEmpty()) {
+                    ensureDirectBuffers(n);
+                    var dd = dbufDistances.asDoubleBuffer();
+                    dd.put(distances, 0, n);
+                    var ds = dbufSpeeds.asDoubleBuffer();
+                    ds.put(speeds, 0, n);
+                    var dc = dbufCos.asDoubleBuffer();
+                    dc.put(cosAngles, 0, n);
+                    NativeCulling.shouldCullBatchIntoDirect(dbufDistances, dbufSpeeds, dbufCos, dbufOut, n, maxDistance, speedThreshold, cosAngleThreshold);
+                    culls = new boolean[n];
+                    for (int i = 0; i < n; i++) culls[i] = dbufOut.get(i) != 0;
+                } else if (!typeThresholds.isEmpty()) {
+                    // Ensure heap buffers are large enough
+                    if (bufDistances == null || bufDistances.length < n) {
+                        int cap = Math.max(1024, Integer.highestOneBit(n - 1) << 1);
+                        bufDistances = new double[cap];
+                        bufSpeeds = new double[cap];
+                        bufCos = new double[cap];
+                        bufOut = new boolean[cap];
+                        bufTypeCodes = new int[cap];
+                    }
+                    System.arraycopy(distances, 0, bufDistances, 0, n);
+                    System.arraycopy(speeds, 0, bufSpeeds, 0, n);
+                    System.arraycopy(cosAngles, 0, bufCos, 0, n);
                     // Map type names to compact codes
                     var keys = new java.util.ArrayList<>(typeThresholds.keySet());
                     java.util.Collections.sort(keys);
@@ -354,10 +388,24 @@ public final class CullingService {
                     NativeCulling.shouldCullBatchIntoByType(bufDistances, bufSpeeds, bufCos, bufTypeCodes, tMax, tSpd, tCos, bufOut);
                     culls = java.util.Arrays.copyOf(bufOut, n);
                 } else {
+                    // Ensure heap buffers are large enough
+                    if (bufDistances == null || bufDistances.length < n) {
+                        int cap = Math.max(1024, Integer.highestOneBit(n - 1) << 1);
+                        bufDistances = new double[cap];
+                        bufSpeeds = new double[cap];
+                        bufCos = new double[cap];
+                        bufOut = new boolean[cap];
+                        bufTypeCodes = new int[cap];
+                    }
+                    System.arraycopy(distances, 0, bufDistances, 0, n);
+                    System.arraycopy(speeds, 0, bufSpeeds, 0, n);
+                    System.arraycopy(cosAngles, 0, bufCos, 0, n);
                     NativeCulling.shouldCullBatchInto(bufDistances, bufSpeeds, bufCos, bufOut, maxDistance, speedThreshold, cosAngleThreshold);
                     culls = java.util.Arrays.copyOf(bufOut, n);
                 }
             } catch (Throwable t) {
+                logger.warn("Native culling failed; disabling native path and falling back to Java: {}", t.toString());
+                try { nativeBridge.disable(); } catch (Throwable ignored) {}
                 culls = null;
             }
         } else {
@@ -425,4 +473,23 @@ public final class CullingService {
     public int getWindowProcessed() { return windowProcessed; }
     public double getWindowRatio() { return windowProcessed > 0 ? (double) windowCulled / (double) windowProcessed : 0.0; }
     public boolean isRatioPercent() { return ratioPercent; }
+
+    private void ensureDirectBuffers(int n) {
+        int needDoublesBytes = n * Double.BYTES;
+        int needOutBytes = n; // 1 byte per flag
+        if (dbufDistances == null || dbufDistances.capacity() < needDoublesBytes) {
+            int cap = Math.max(8192, Integer.highestOneBit(needDoublesBytes - 1) << 1);
+            dbufDistances = java.nio.ByteBuffer.allocateDirect(cap).order(java.nio.ByteOrder.nativeOrder());
+            dbufSpeeds = java.nio.ByteBuffer.allocateDirect(cap).order(java.nio.ByteOrder.nativeOrder());
+            dbufCos = java.nio.ByteBuffer.allocateDirect(cap).order(java.nio.ByteOrder.nativeOrder());
+        } else {
+            dbufDistances.clear(); dbufSpeeds.clear(); dbufCos.clear();
+        }
+        if (dbufOut == null || dbufOut.capacity() < needOutBytes) {
+            int cap = Math.max(8192, Integer.highestOneBit(needOutBytes - 1) << 1);
+            dbufOut = java.nio.ByteBuffer.allocateDirect(cap).order(java.nio.ByteOrder.nativeOrder());
+        } else {
+            dbufOut.clear();
+        }
+    }
 }

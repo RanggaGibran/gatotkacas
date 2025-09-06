@@ -73,6 +73,8 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
           bstats.addCustomChart(new SimplePie("packet_culling_enabled", () -> getConfig().getBoolean("features.packet-culling.enabled", false) ? "true" : "false"));
           bstats.addCustomChart(new SimplePie("redstone_guard_enabled", () -> getConfig().getBoolean("features.redstone-guard.enabled", false) ? "true" : "false"));
           bstats.addCustomChart(new SimplePie("spawn_throttle_enabled", () -> getConfig().getBoolean("features.spawn-throttle.enabled", false) ? "true" : "false"));
+          // Is native active
+          bstats.addCustomChart(new SimplePie("native_active", () -> nativeBridge != null && nativeBridge.isLoaded() ? "true" : "false"));
           // Culling counts (updated on pull by bStats)
           bstats.addCustomChart(new MultiLineChart("culling_counts", () -> {
             java.util.Map<String, Integer> m = new java.util.HashMap<>();
@@ -81,6 +83,16 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
             return m;
           }));
           bstats.addCustomChart(new SingleLineChart("culling_ratio_percent", () -> (int) Math.round(ratioLastTick() * (ratioPercent() ? 1 : 100))));
+          // MSPT buckets (one-hot)
+          bstats.addCustomChart(new MultiLineChart("mspt_buckets", () -> {
+            java.util.Map<String, Integer> m = new java.util.HashMap<>();
+            double v = tickMonitor != null ? tickMonitor.avgMspt() : 0.0;
+            m.put("lt25", v < 25.0 ? 1 : 0);
+            m.put("25_35", v >= 25.0 && v < 35.0 ? 1 : 0);
+            m.put("35_45", v >= 35.0 && v < 45.0 ? 1 : 0);
+            m.put("gt45", v >= 45.0 ? 1 : 0);
+            return m;
+          }));
         } catch (Throwable t) {
           getSLF4JLogger().warn("Failed to init bStats, proceeding without metrics", t);
         }
