@@ -31,4 +31,16 @@ public final class NativeCulling {
         double speedThreshold,
         double cosAngleThreshold
     );
+
+    // Batch with per-entity type codes and per-type thresholds; writes into outFlags
+    public static native void shouldCullBatchIntoByType(
+        double[] distances,
+        double[] speeds,
+        double[] cosAngles,
+        int[] typeCodes,
+        double[] typeMaxDistance,
+        double[] typeSpeedThreshold,
+        double[] typeCosAngleThreshold,
+        boolean[] outFlags
+    );
 }

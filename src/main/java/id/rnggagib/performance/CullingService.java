@@ -45,6 +45,12 @@ public final class CullingService {
     private int chunkRadius;
     private java.util.Map<String, Integer> trackingRangePerWorld = new java.util.HashMap<>();
     private java.util.Map<String, TypeThreshold> typeThresholds = new java.util.HashMap<>();
+    // Small pre-sized buffer pool to avoid allocations
+    private double[] bufDistances;
+    private double[] bufSpeeds;
+    private double[] bufCos;
+    private boolean[] bufOut;
+    private int[] bufTypeCodes;
 
     // Metrics
     private int lastCulledCount = 0;
@@ -310,32 +316,46 @@ public final class CullingService {
         boolean[] culls;
         if (nativeBridge.isLoaded()) {
             try {
-                culls = new boolean[n];
-                // If per-type thresholds provided, we need to split batches by type to apply custom thresholds
+                // Ensure buffers are large enough
+                if (bufDistances == null || bufDistances.length < n) {
+                    int cap = Math.max(1024, Integer.highestOneBit(n - 1) << 1);
+                    bufDistances = new double[cap];
+                    bufSpeeds = new double[cap];
+                    bufCos = new double[cap];
+                    bufOut = new boolean[cap];
+                    bufTypeCodes = new int[cap];
+                }
+                System.arraycopy(distances, 0, bufDistances, 0, n);
+                System.arraycopy(speeds, 0, bufSpeeds, 0, n);
+                System.arraycopy(cosAngles, 0, bufCos, 0, n);
+
                 if (!typeThresholds.isEmpty()) {
-                    // Build lightweight buckets of indices per type
-                    var buckets = new java.util.HashMap<String, java.util.ArrayList<Integer>>();
+                    // Map type names to compact codes
+                    var keys = new java.util.ArrayList<>(typeThresholds.keySet());
+                    java.util.Collections.sort(keys);
+                    var codeByType = new java.util.HashMap<String, Integer>(keys.size());
+                    for (int i = 0; i < keys.size(); i++) codeByType.put(keys.get(i), i);
                     for (int i = 0; i < n; i++) {
-                        if (!valid[i]) continue;
-                        String t = snap.entities.get(i).typeName.toUpperCase();
-                        buckets.computeIfAbsent(t, k -> new java.util.ArrayList<>()).add(i);
+                        if (!valid[i]) { bufTypeCodes[i] = 0; continue; }
+                        String tname = snap.entities.get(i).typeName.toUpperCase();
+                        Integer code = codeByType.get(tname);
+                        bufTypeCodes[i] = code == null ? 0 : code;
                     }
-                    for (var entry : buckets.entrySet()) {
-                        var idxs = entry.getValue();
-                        var th = typeThresholds.getOrDefault(entry.getKey(), new TypeThreshold(maxDistance, speedThreshold, cosAngleThreshold));
-                        double[] dSub = new double[idxs.size()];
-                        double[] sSub = new double[idxs.size()];
-                        double[] cSub = new double[idxs.size()];
-                        boolean[] outSub = new boolean[idxs.size()];
-                        for (int k = 0; k < idxs.size(); k++) {
-                            int i0 = idxs.get(k);
-                            dSub[k] = distances[i0]; sSub[k] = speeds[i0]; cSub[k] = cosAngles[i0];
-                        }
-                        NativeCulling.shouldCullBatchInto(dSub, sSub, cSub, outSub, th.maxDistance, th.speedThreshold, th.cosAngleThreshold);
-                        for (int k = 0; k < idxs.size(); k++) culls[idxs.get(k)] = outSub[k];
+                    double[] tMax = new double[keys.size() > 0 ? keys.size() : 1];
+                    double[] tSpd = new double[tMax.length];
+                    double[] tCos = new double[tMax.length];
+                    for (int i = 0; i < keys.size(); i++) {
+                        var th = typeThresholds.get(keys.get(i));
+                        tMax[i] = th.maxDistance; tSpd[i] = th.speedThreshold; tCos[i] = th.cosAngleThreshold;
                     }
+                    if (tMax.length == 1 && keys.isEmpty()) { // default bucket if none
+                        tMax[0] = maxDistance; tSpd[0] = speedThreshold; tCos[0] = cosAngleThreshold;
+                    }
+                    NativeCulling.shouldCullBatchIntoByType(bufDistances, bufSpeeds, bufCos, bufTypeCodes, tMax, tSpd, tCos, bufOut);
+                    culls = java.util.Arrays.copyOf(bufOut, n);
                 } else {
-                    NativeCulling.shouldCullBatchInto(distances, speeds, cosAngles, culls, maxDistance, speedThreshold, cosAngleThreshold);
+                    NativeCulling.shouldCullBatchInto(bufDistances, bufSpeeds, bufCos, bufOut, maxDistance, speedThreshold, cosAngleThreshold);
+                    culls = java.util.Arrays.copyOf(bufOut, n);
                 }
             } catch (Throwable t) {
                 culls = null;
@@ -379,6 +399,15 @@ public final class CullingService {
                             java.util.List<EntitySnap> entities) {}
     private record Result(UUID entityId, boolean cull, UUID nearestPlayerId) {}
     private record ComputationResult(java.util.List<Result> results) {}
+
+    // Quick scalar check used by packet culling
+    public boolean quickShouldCull(double distance, double speed, double cos) {
+        boolean base = distance > maxDistance && speed < speedThreshold && cos < cosAngleThreshold;
+        if (frustumApprox) {
+            return base && cos < (cosAngleThreshold - 0.15);
+        }
+        return base;
+    }
 
     public int getLastCulledCount() {
         return lastCulledCount;

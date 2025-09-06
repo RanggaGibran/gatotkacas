@@ -25,6 +25,7 @@ public class GatotkacasCommand implements TabExecutor {
     int windowProcessed();
     double windowRatio();
     boolean ratioPercent();
+    String diag();
     }
 
     public GatotkacasCommand(Reloadable reloadable) {
@@ -39,7 +40,7 @@ public class GatotkacasCommand implements TabExecutor {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (args.length == 0) {
-            send(sender, reloadable.mm("messages.usage", "<gray>/" + label + " <yellow>[reload|info]</yellow></gray>"));
+            send(sender, reloadable.mm("messages.usage", "<gray>/" + label + " <yellow>[reload|info|diag]</yellow></gray>"));
             return true;
         }
         switch (args[0].toLowerCase()) {
@@ -71,8 +72,16 @@ public class GatotkacasCommand implements TabExecutor {
         send(sender, msg);
                 return true;
             }
+            case "diag" -> {
+                if (!sender.hasPermission("gatotkacas.diag")) {
+                    send(sender, reloadable.mm("messages.no-permission", "<red>No permission.</red>"));
+                    return true;
+                }
+                send(sender, reloadable.diag());
+                return true;
+            }
             default -> {
-                send(sender, reloadable.mm("messages.usage", "<gray>/" + label + " <yellow>[reload|info]</yellow></gray>"));
+                send(sender, reloadable.mm("messages.usage", "<gray>/" + label + " <yellow>[reload|info|diag]</yellow></gray>"));
                 return true;
             }
         }
@@ -84,6 +93,7 @@ public class GatotkacasCommand implements TabExecutor {
         if (args.length == 1) {
             if (sender.hasPermission("gatotkacas.reload")) list.add("reload");
             list.add("info");
+            if (sender.hasPermission("gatotkacas.diag")) list.add("diag");
         }
         return list;
     }

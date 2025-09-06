@@ -1,5 +1,5 @@
 use jni::objects::{JBooleanArray, JClass, JDoubleArray};
-use jni::sys::{jboolean, jbooleanArray, jdoubleArray};
+use jni::sys::{jboolean, jbooleanArray, jdoubleArray, jintArray};
 use jni::JNIEnv;
 
 #[no_mangle]
@@ -117,6 +117,66 @@ pub extern "system" fn Java_id_rnggagib_nativebridge_NativeCulling_shouldCullBat
     let mut out: Vec<jboolean> = vec![0; len];
     for i in 0..len {
         out[i] = if d[i] > max_distance && s[i] < speed_threshold && c[i] < cos_angle_threshold { 1 } else { 0 };
+    }
+    let _ = env.set_boolean_array_region(&out_flags, 0, &out);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_id_rnggagib_nativebridge_NativeCulling_shouldCullBatchIntoByType(
+    env: JNIEnv,
+    _class: JClass,
+    distances_raw: jdoubleArray,
+    speeds_raw: jdoubleArray,
+    cos_angles_raw: jdoubleArray,
+    type_codes_raw: jintArray,
+    type_max_distance_raw: jdoubleArray,
+    type_speed_threshold_raw: jdoubleArray,
+    type_cos_threshold_raw: jdoubleArray,
+    out_flags_raw: jbooleanArray,
+) {
+    let distances = unsafe { JDoubleArray::from_raw(distances_raw) };
+    let speeds = unsafe { JDoubleArray::from_raw(speeds_raw) };
+    let cos_angles = unsafe { JDoubleArray::from_raw(cos_angles_raw) };
+    let type_codes = unsafe { jni::objects::JIntArray::from_raw(type_codes_raw) };
+    let type_md = unsafe { JDoubleArray::from_raw(type_max_distance_raw) };
+    let type_st = unsafe { JDoubleArray::from_raw(type_speed_threshold_raw) };
+    let type_ct = unsafe { JDoubleArray::from_raw(type_cos_threshold_raw) };
+    let out_flags = unsafe { JBooleanArray::from_raw(out_flags_raw) };
+
+    let len = match env.get_array_length(&distances) { Ok(l) => l, Err(_) => return } as usize;
+    if len == 0 { return; }
+    if env.get_array_length(&speeds).ok().map(|x| x as usize) != Some(len) { return; }
+    if env.get_array_length(&cos_angles).ok().map(|x| x as usize) != Some(len) { return; }
+    if env.get_array_length(&type_codes).ok().map(|x| x as usize) != Some(len) { return; }
+    if env.get_array_length(&out_flags).ok().map(|x| x as usize) != Some(len) { return; }
+
+    let type_md_len = match env.get_array_length(&type_md) { Ok(l) => l, Err(_) => return } as usize;
+    let type_st_len = match env.get_array_length(&type_st) { Ok(l) => l, Err(_) => return } as usize;
+    let type_ct_len = match env.get_array_length(&type_ct) { Ok(l) => l, Err(_) => return } as usize;
+    if type_md_len == 0 || type_st_len != type_md_len || type_ct_len != type_md_len { return; }
+
+    let mut d = vec![0f64; len];
+    let mut s = vec![0f64; len];
+    let mut c = vec![0f64; len];
+    let mut t = vec![0i32; len];
+    if env.get_double_array_region(&distances, 0, &mut d).is_err() { return; }
+    if env.get_double_array_region(&speeds, 0, &mut s).is_err() { return; }
+    if env.get_double_array_region(&cos_angles, 0, &mut c).is_err() { return; }
+    if env.get_int_array_region(&type_codes, 0, &mut t).is_err() { return; }
+
+    let mut md = vec![0f64; type_md_len];
+    let mut st = vec![0f64; type_st_len];
+    let mut ct = vec![0f64; type_ct_len];
+    if env.get_double_array_region(&type_md, 0, &mut md).is_err() { return; }
+    if env.get_double_array_region(&type_st, 0, &mut st).is_err() { return; }
+    if env.get_double_array_region(&type_ct, 0, &mut ct).is_err() { return; }
+
+    let mut out: Vec<jboolean> = vec![0; len];
+    for i in 0..len {
+        let code = t[i] as usize;
+        if code >= type_md_len { continue; }
+        let cull = d[i] > md[code] && s[i] < st[code] && c[i] < ct[code];
+        out[i] = if cull { 1 } else { 0 };
     }
     let _ = env.set_boolean_array_region(&out_flags, 0, &out);
 }

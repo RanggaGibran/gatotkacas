@@ -1,7 +1,7 @@
 # Default configuration for gatotkacas
 # MiniMessage format is used for all messages
 messages:
-  usage: "<gray>/gatotkacas <yellow>[reload|info]</yellow></gray>"
+  usage: "<gray>/gatotkacas <yellow>[reload|info|diag]</yellow></gray>"
   no-permission: "<red>No permission.</red>"
   reloaded: "<green>Configuration reloaded.</green>"
   info: "<gray>Running <green>gatotkacas</green> v<version></gray> | <gray>tick:<green><culled></green>/<green><processed></green> (<green><ratio></green>)</gray> | <gray>window:<green><wculled></green>/<green><wprocessed></green> (<green><wratio></green>)</gray>"
@@ -44,6 +44,39 @@ features:
   #     speed-threshold: 0.05
   #     cos-angle-threshold: 0.25
   type-thresholds: {}
+
+  # Cancel spawn packets for culled entities (requires ProtocolLib on server)
+  packet-culling:
+    enabled: false
+    exclude-types: ["PLAYER", "ARMOR_STAND"]
+
+  # Adapt view/simulation distance based on MSPT
+  adaptive-distance:
+    enabled: false
+    high-mspt: 45.0
+    low-mspt: 30.0
+    min-view-distance: 6
+    max-view-distance: 10
+    min-sim-distance: 4
+    max-sim-distance: 8
+    period-ticks: 200
+
+  # Redstone guard to reduce clock spam
+  redstone-guard:
+    enabled: false
+    window-ticks: 200
+    toggle-limit: 500
+
+  # Skip creature spawns when no nearby players
+  spawn-throttle:
+    enabled: false
+    player-radius: 48.0
+    reasons: ["NATURAL", "SPAWNER"]
+    ai:
+      enabled: false
+      radius: 80.0
+      period-ticks: 40
+      max-per-tick: 200
 
 # Small server-side tweaks
 tweaks:

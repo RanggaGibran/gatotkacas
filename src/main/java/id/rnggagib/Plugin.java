@@ -5,6 +5,10 @@ import id.rnggagib.nativebridge.NativeBridge;
 import id.rnggagib.performance.CullingService;
 import id.rnggagib.monitor.TickMonitor;
 import id.rnggagib.tweaks.TweaksService;
+import id.rnggagib.performance.AdaptiveDistanceService;
+import id.rnggagib.performance.SpawnThrottleService;
+import id.rnggagib.tweaks.RedstoneGuardService;
+import id.rnggagib.performance.PacketCullingReflectService;
 import org.bukkit.plugin.java.JavaPlugin;
 
 
@@ -13,6 +17,10 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   private CullingService cullingService;
   private TickMonitor tickMonitor;
   private TweaksService tweaksService;
+  private AdaptiveDistanceService adaptiveDistanceService;
+  private SpawnThrottleService spawnThrottleService;
+  private RedstoneGuardService redstoneGuardService;
+  private PacketCullingReflectService packetCullingService;
 
   @Override
   public void onEnable() {
@@ -69,6 +77,26 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   tweaksService.loadFromConfig();
   tweaksService.start();
 
+
+  // Adaptive view/sim distance based on MSPT
+  adaptiveDistanceService = new AdaptiveDistanceService(this, getSLF4JLogger(), tickMonitor);
+  adaptiveDistanceService.loadFromConfig();
+  adaptiveDistanceService.start();
+
+  // Spawn throttle and redstone guard
+  spawnThrottleService = new SpawnThrottleService(this, getSLF4JLogger());
+  spawnThrottleService.loadFromConfig();
+  spawnThrottleService.start();
+
+  redstoneGuardService = new RedstoneGuardService(this, getSLF4JLogger());
+  redstoneGuardService.loadFromConfig();
+  redstoneGuardService.start();
+
+  // Optional packet-level culling via ProtocolLib (reflection)
+  packetCullingService = new PacketCullingReflectService(this, getSLF4JLogger(), cullingService);
+  packetCullingService.loadFromConfig();
+  packetCullingService.start();
+
     getSLF4JLogger().info("gatotkacas enabled");
   }
 
@@ -77,6 +105,10 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   if (cullingService != null) cullingService.stop();
   if (tickMonitor != null) tickMonitor.stop();
   if (tweaksService != null) tweaksService.stop();
+  if (adaptiveDistanceService != null) adaptiveDistanceService.stop();
+  if (spawnThrottleService != null) spawnThrottleService.stop();
+  if (redstoneGuardService != null) redstoneGuardService.stop();
+  if (packetCullingService != null) packetCullingService.stop();
     getSLF4JLogger().info("gatotkacas disabled");
   }
 
@@ -104,6 +136,22 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
     if (tweaksService != null) {
       tweaksService.loadFromConfig();
       tweaksService.start();
+    }
+    if (adaptiveDistanceService != null) {
+      adaptiveDistanceService.loadFromConfig();
+      adaptiveDistanceService.start();
+    }
+    if (spawnThrottleService != null) {
+      spawnThrottleService.loadFromConfig();
+      spawnThrottleService.start();
+    }
+    if (redstoneGuardService != null) {
+      redstoneGuardService.loadFromConfig();
+      redstoneGuardService.start();
+    }
+    if (packetCullingService != null) {
+      packetCullingService.loadFromConfig();
+      packetCullingService.start();
     }
   }
 
@@ -134,4 +182,46 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   public int windowProcessed() { return cullingService != null ? cullingService.getWindowProcessed() : 0; }
   public double windowRatio() { return cullingService != null ? cullingService.getWindowRatio() : 0.0; }
   public boolean ratioPercent() { return cullingService != null && cullingService.isRatioPercent(); }
+
+  @Override
+  public String diag() {
+    StringBuilder sb = new StringBuilder();
+    double mspt = tickMonitor != null ? tickMonitor.avgMspt() : 0.0;
+    sb.append("<gray>MSPT:</gray> <green>").append(String.format("%.2f", mspt)).append("</green>\n");
+    // Worlds
+    sb.append("<gray>World distances:</gray> ");
+    var worlds = org.bukkit.Bukkit.getWorlds();
+    for (int i = 0; i < worlds.size(); i++) {
+      var w = worlds.get(i);
+      sb.append("<yellow>").append(w.getName()).append("</yellow>")
+        .append("[view=").append(w.getViewDistance()).append(", sim=").append(w.getSimulationDistance()).append("]");
+      if (i < worlds.size() - 1) sb.append(", ");
+    }
+    sb.append("\n");
+
+    // Redstone suppressed info (approx)
+    sb.append("<gray>Redstone guard:</gray> ");
+    if (redstoneGuardService != null) {
+      sb.append("<green>enabled</green> <gray>throttled-chunks:</gray> <yellow>")
+        .append(redstoneGuardService.throttledChunkCountLastWindow())
+        .append("</yellow> <gray>suppressed-toggles:</gray> <yellow>")
+        .append(redstoneGuardService.suppressedToggleCount()).append("</yellow>\n");
+    } else {
+      sb.append("<red>disabled</red>\n");
+    }
+
+    // Spawn throttle stats (we'll expose counters inside service; fallback text if not available)
+    if (spawnThrottleService != null) {
+      sb.append("<gray>Spawn throttle:</gray> <green>enabled</green>\n");
+      var st = spawnThrottleService.getStats();
+      sb.append("<gray>  cancelled:</gray> <yellow>").append(st.cancelled()).append("</yellow>")
+        .append(" <gray>allowed:</gray> <yellow>").append(st.allowed()).append("</yellow>")
+        .append(" <gray>ai-skipped:</gray> <yellow>").append(st.aiSkipped()).append("</yellow>")
+        .append("\n");
+    } else {
+      sb.append("<gray>Spawn throttle:</gray> <red>disabled</red>\n");
+    }
+
+    return sb.toString();
+  }
 }
