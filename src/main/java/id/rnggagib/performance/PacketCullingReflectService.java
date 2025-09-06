@@ -49,8 +49,16 @@ public final class PacketCullingReflectService {
         stop();
         if (!enabled) { logger.info("Packet culling disabled"); return; }
 
+        // Resolve ProtocolLib via PluginManager and use its classloader (plugin classloaders are isolated)
+        ClassLoader plCl;
         try {
-            Class<?> protocolLibraryCls = Class.forName("com.comphenix.protocol.ProtocolLibrary", false, Bukkit.getServer().getClass().getClassLoader());
+            var pl = Bukkit.getPluginManager().getPlugin("ProtocolLib");
+            if (pl == null || !pl.isEnabled()) {
+                logger.info("ProtocolLib not found or not enabled; packet culling skipped");
+                return;
+            }
+            plCl = pl.getClass().getClassLoader();
+            Class<?> protocolLibraryCls = Class.forName("com.comphenix.protocol.ProtocolLibrary", false, plCl);
             Method getPM = protocolLibraryCls.getMethod("getProtocolManager");
             protocolManager = getPM.invoke(null);
         } catch (Throwable t) {
@@ -76,7 +84,12 @@ public final class PacketCullingReflectService {
             try {
                 spawnLiving = packetTypePlayServerCls.getField("SPAWN_ENTITY_LIVING").get(null);
             } catch (NoSuchFieldException nsf) {
-                spawnLiving = null; // Some versions may differ
+                try {
+                    // Fallback name used in some ProtocolLib versions
+                    spawnLiving = packetTypePlayServerCls.getField("SPAWN_LIVING").get(null);
+                } catch (NoSuchFieldException nsf2) {
+                    spawnLiving = null; // Not available
+                }
             }
 
             // Build ListeningWhitelist for sending packets using builder pattern
@@ -110,11 +123,12 @@ public final class PacketCullingReflectService {
             Object receivingWhitelist = bBuild.invoke(recvBuilder);
 
             // Create dynamic proxy for PacketListener
-            packetListener = Proxy.newProxyInstance(cl, new Class[]{packetListenerItf}, new InvocationHandler() {
+        packetListener = Proxy.newProxyInstance(cl, new Class[]{packetListenerItf}, new InvocationHandler() {
                 @Override
                 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
                     String name = method.getName();
                     if (name.equals("getPlugin")) return plugin;
+            if (name.equals("getPriority")) return priorityNormal;
                     if (name.equals("getListeningWhitelist") || name.equals("getSendingWhitelist")) return sendingWhitelist;
                     if (name.equals("getReceivingWhitelist")) return receivingWhitelist;
                     if (name.equals("onPacketSending")) {
@@ -178,7 +192,7 @@ public final class PacketCullingReflectService {
             add.invoke(protocolManager, packetListener);
             logger.info("Packet culling enabled (ProtocolLib via reflection)");
         } catch (Throwable t) {
-            logger.warn("Failed to enable packet culling via reflection: {}", t.toString());
+            logger.warn("Failed to enable packet culling via reflection", t);
         }
     }
 

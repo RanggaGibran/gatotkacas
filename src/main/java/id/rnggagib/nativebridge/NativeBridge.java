@@ -81,11 +81,16 @@ public final class NativeBridge {
     }
 
     private boolean attemptDownload(File target, String url, String sha256) {
-        try {
-            var client = HttpClient.newHttpClient();
-            var request = HttpRequest.newBuilder(URI.create(url)).GET().build();
+    try {
+        var client = HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
+        var request = HttpRequest.newBuilder(URI.create(url))
+            .header("User-Agent", "gatotkacas-native-downloader/1.0 (+https://github.com/RanggaGibran/gatotkacas)")
+            .GET()
+            .build();
             var response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
                 byte[] body = response.body();
                 if (sha256 != null && !sha256.isBlank()) {
                     String got = hashSha256Hex(body);
