@@ -7,6 +7,10 @@ messages:
   info: "<gray>Running <green>gatotkacas</green> v<version></gray> | <gray>tick:<green><culled></green>/<green><processed></green> (<green><ratio></green>)</gray> | <gray>window:<green><wculled></green>/<green><wprocessed></green> (<green><wratio></green>)</gray>"
 
 features:
+  bstats:
+    enabled: false
+    # Get a service id at https://bstats.org/ for your plugin
+    service-id: 0
   native:
     enabled: true
     # kosongkan untuk auto-pick sesuai OS di plugins/gatotkacas/natives/<nama>

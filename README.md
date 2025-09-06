@@ -42,6 +42,31 @@ Modern Paper 1.21+ plugin focused on entity culling performance with optional Ru
    The plugin can also auto-download a native if configured.
 3. Start the server. The plugin will create a default `config.yml` if missing.
 
+### Auto-download natives via GitHub Releases
+You can let the plugin download the correct native on startup:
+
+1) Create a tag and push it (e.g. `v0.1.0`). The workflow `Release Natives (culling-rs)` builds on Windows/Linux/macOS and attaches:
+   - `culling_rs-windows-x86_64.dll`
+   - `culling_rs-linux-x86_64.so`
+   - `culling_rs-macos-arm64.dylib`
+   Each with a matching `.sha256` file.
+
+2) In `config.yml`, enable auto-download and point to the asset URL, with its SHA256 hash:
+
+```yaml
+features:
+  native:
+    enabled: true
+    library: "" # leave empty to use auto-download
+    auto-download:
+      enabled: true
+      # Example for Windows runner artifact
+      url: "https://github.com/<owner>/<repo>/releases/download/v0.1.0/culling_rs-windows-x86_64.dll"
+      sha256: "<paste-hash-from-.sha256-file>"
+```
+
+On startup, the plugin downloads to `plugins/gatotkacas/natives/` and loads it automatically.
+
 ## Commands & Permissions
 - `/gatotkacas` (alias: `/gtk`)
   - `gatotkacas.use`: access the base command

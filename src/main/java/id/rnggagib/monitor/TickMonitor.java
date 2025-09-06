@@ -14,6 +14,8 @@ public final class TickMonitor {
     private final Plugin plugin;
     private final Logger logger;
     private final @Nullable CullingService cullingService;
+    private @Nullable id.rnggagib.performance.SpawnThrottleService spawnThrottleService;
+    private @Nullable id.rnggagib.tweaks.RedstoneGuardService redstoneGuardService;
     private int tickTask = -1;
     private int reportTask = -1;
 
@@ -32,6 +34,14 @@ public final class TickMonitor {
         this.plugin = plugin;
         this.logger = logger;
         this.cullingService = cullingService;
+    }
+
+    public void setSpawnThrottleService(@Nullable id.rnggagib.performance.SpawnThrottleService svc) {
+        this.spawnThrottleService = svc;
+    }
+
+    public void setRedstoneGuardService(@Nullable id.rnggagib.tweaks.RedstoneGuardService svc) {
+        this.redstoneGuardService = svc;
     }
 
     public void loadFromConfig() {
@@ -107,6 +117,13 @@ public final class TickMonitor {
                     fw.write("\"tick\":{\"culled\":" + cullingService.getLastCulledCount() + ",\"processed\":" + cullingService.getLastProcessedCount() + ",\"ratio\":" + String.format("%.4f", cullingService.getLastCullRatio()) + "},");
                     fw.write("\"window\":{\"culled\":" + cullingService.getWindowCulled() + ",\"processed\":" + cullingService.getWindowProcessed() + ",\"ratio\":" + String.format("%.4f", cullingService.getWindowRatio()) + "}");
                     fw.write("}");
+                }
+                if (spawnThrottleService != null) {
+                    var st = spawnThrottleService.getStats();
+                    fw.write(",\"spawnThrottle\":{\"cancelled\":" + st.cancelled() + ",\"allowed\":" + st.allowed() + ",\"aiSkipped\":" + st.aiSkipped() + "}");
+                }
+                if (redstoneGuardService != null) {
+                    fw.write(",\"redstoneGuard\":{\"throttledChunks\":" + redstoneGuardService.throttledChunkCountLastWindow() + ",\"suppressed\":" + redstoneGuardService.suppressedToggleCount() + "}");
                 }
                 fw.write("}\n");
             }

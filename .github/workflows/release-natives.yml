@@ -1,0 +1,67 @@
+name: Release Natives (culling-rs)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build native (release)
+        working-directory: native/culling-rs
+        run: cargo build --release
+
+      - name: Prepare artifact name (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            SRC="native/culling-rs/target/release/*.so"
+            NAME="culling_rs-linux-x86_64.so"
+          else
+            SRC="native/culling-rs/target/release/*.dylib"
+            # macos-latest is Apple Silicon on GitHub runners
+            NAME="culling_rs-macos-arm64.dylib"
+          fi
+          cp $SRC "artifacts/${NAME}"
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            sha256sum "artifacts/${NAME}" | awk '{print $1}' > "artifacts/${NAME}.sha256"
+          else
+            shasum -a 256 "artifacts/${NAME}" | awk '{print $1}' > "artifacts/${NAME}.sha256"
+          fi
+
+      - name: Prepare artifact name (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          $src = Get-ChildItem native/culling-rs/target/release/*.dll | Select-Object -First 1
+          $name = "culling_rs-windows-x86_64.dll"
+          Copy-Item $src.FullName (Join-Path artifacts $name)
+          $hash = (Get-FileHash -Algorithm SHA256 (Join-Path artifacts $name)).Hash.ToLower()
+          Set-Content -NoNewline -Path (Join-Path artifacts "$name.sha256") -Value $hash
+
+      - name: Create or update GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*
+          generate_release_notes: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -10,6 +10,11 @@ import id.rnggagib.performance.SpawnThrottleService;
 import id.rnggagib.tweaks.RedstoneGuardService;
 import id.rnggagib.performance.PacketCullingReflectService;
 import org.bukkit.plugin.java.JavaPlugin;
+// bStats (shade will relocate packages at build time)
+import org.bstats.bukkit.Metrics;
+import org.bstats.charts.SimplePie;
+import org.bstats.charts.MultiLineChart;
+import org.bstats.charts.SingleLineChart;
 
 
 public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
@@ -21,6 +26,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   private SpawnThrottleService spawnThrottleService;
   private RedstoneGuardService redstoneGuardService;
   private PacketCullingReflectService packetCullingService;
+  private Metrics bstats;
 
   @Override
   public void onEnable() {
@@ -52,6 +58,36 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
     };
     runtimeCmd.setPermission("gatotkacas.use");
     org.bukkit.Bukkit.getCommandMap().register(getName().toLowerCase(), runtimeCmd);
+
+    // bStats (optional)
+    boolean bstatsEnabled = getConfig().getBoolean("features.bstats.enabled", false);
+    int bstatsId = getConfig().getInt("features.bstats.service-id", 0);
+    if (bstatsEnabled) {
+      if (bstatsId > 0) {
+        try {
+          bstats = new Metrics(this, bstatsId);
+          // Simple pies for environment & feature toggles
+          bstats.addCustomChart(new SimplePie("paper_version", () -> getServer().getBukkitVersion()));
+          bstats.addCustomChart(new SimplePie("java_version", () -> System.getProperty("java.version", "unknown")));
+          bstats.addCustomChart(new SimplePie("culling_enabled", () -> getConfig().getBoolean("features.culling.enabled", true) ? "true" : "false"));
+          bstats.addCustomChart(new SimplePie("packet_culling_enabled", () -> getConfig().getBoolean("features.packet-culling.enabled", false) ? "true" : "false"));
+          bstats.addCustomChart(new SimplePie("redstone_guard_enabled", () -> getConfig().getBoolean("features.redstone-guard.enabled", false) ? "true" : "false"));
+          bstats.addCustomChart(new SimplePie("spawn_throttle_enabled", () -> getConfig().getBoolean("features.spawn-throttle.enabled", false) ? "true" : "false"));
+          // Culling counts (updated on pull by bStats)
+          bstats.addCustomChart(new MultiLineChart("culling_counts", () -> {
+            java.util.Map<String, Integer> m = new java.util.HashMap<>();
+            m.put("culled", culledLastTick());
+            m.put("processed", processedLastTick());
+            return m;
+          }));
+          bstats.addCustomChart(new SingleLineChart("culling_ratio_percent", () -> (int) Math.round(ratioLastTick() * (ratioPercent() ? 1 : 100))));
+        } catch (Throwable t) {
+          getSLF4JLogger().warn("Failed to init bStats, proceeding without metrics", t);
+        }
+      } else {
+        getSLF4JLogger().warn("bStats enabled but features.bstats.service-id is not set (>0). Skipping metrics init.");
+      }
+    }
 
   // Try load native bridge if enabled
   nativeBridge = new NativeBridge(getSLF4JLogger(), getDataFolder());
@@ -87,10 +123,12 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   spawnThrottleService = new SpawnThrottleService(this, getSLF4JLogger());
   spawnThrottleService.loadFromConfig();
   spawnThrottleService.start();
+  tickMonitor.setSpawnThrottleService(spawnThrottleService);
 
   redstoneGuardService = new RedstoneGuardService(this, getSLF4JLogger());
   redstoneGuardService.loadFromConfig();
   redstoneGuardService.start();
+  tickMonitor.setRedstoneGuardService(redstoneGuardService);
 
   // Optional packet-level culling via ProtocolLib (reflection)
   packetCullingService = new PacketCullingReflectService(this, getSLF4JLogger(), cullingService);
@@ -144,10 +182,12 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
     if (spawnThrottleService != null) {
       spawnThrottleService.loadFromConfig();
       spawnThrottleService.start();
+  if (tickMonitor != null) tickMonitor.setSpawnThrottleService(spawnThrottleService);
     }
     if (redstoneGuardService != null) {
       redstoneGuardService.loadFromConfig();
       redstoneGuardService.start();
+  if (tickMonitor != null) tickMonitor.setRedstoneGuardService(redstoneGuardService);
     }
     if (packetCullingService != null) {
       packetCullingService.loadFromConfig();
@@ -187,39 +227,39 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   public String diag() {
     StringBuilder sb = new StringBuilder();
     double mspt = tickMonitor != null ? tickMonitor.avgMspt() : 0.0;
+    sb.append("<gold><bold>== Diagnostics ==</bold></gold>\n");
     sb.append("<gray>MSPT:</gray> <green>").append(String.format("%.2f", mspt)).append("</green>\n");
-    // Worlds
-    sb.append("<gray>World distances:</gray> ");
+    sb.append("\n<yellow><bold>Worlds</bold></yellow>\n");
     var worlds = org.bukkit.Bukkit.getWorlds();
     for (int i = 0; i < worlds.size(); i++) {
       var w = worlds.get(i);
-      sb.append("<yellow>").append(w.getName()).append("</yellow>")
-        .append("[view=").append(w.getViewDistance()).append(", sim=").append(w.getSimulationDistance()).append("]");
-      if (i < worlds.size() - 1) sb.append(", ");
+      sb.append("  <yellow>").append(w.getName()).append("</yellow> ")
+        .append("[view=").append(w.getViewDistance()).append(", sim=").append(w.getSimulationDistance()).append("]\n");
     }
     sb.append("\n");
 
     // Redstone suppressed info (approx)
-    sb.append("<gray>Redstone guard:</gray> ");
+    sb.append("<yellow><bold>Redstone</bold></yellow>\n");
     if (redstoneGuardService != null) {
-      sb.append("<green>enabled</green> <gray>throttled-chunks:</gray> <yellow>")
+      sb.append("  <green>enabled</green> <gray>throttled-chunks:</gray> <yellow>")
         .append(redstoneGuardService.throttledChunkCountLastWindow())
         .append("</yellow> <gray>suppressed-toggles:</gray> <yellow>")
         .append(redstoneGuardService.suppressedToggleCount()).append("</yellow>\n");
     } else {
-      sb.append("<red>disabled</red>\n");
+      sb.append("  <red>disabled</red>\n");
     }
 
     // Spawn throttle stats (we'll expose counters inside service; fallback text if not available)
     if (spawnThrottleService != null) {
-      sb.append("<gray>Spawn throttle:</gray> <green>enabled</green>\n");
+      sb.append("<yellow><bold>Spawn/AI</bold></yellow>\n");
+      sb.append("  <green>enabled</green>\n");
       var st = spawnThrottleService.getStats();
-      sb.append("<gray>  cancelled:</gray> <yellow>").append(st.cancelled()).append("</yellow>")
-        .append(" <gray>allowed:</gray> <yellow>").append(st.allowed()).append("</yellow>")
-        .append(" <gray>ai-skipped:</gray> <yellow>").append(st.aiSkipped()).append("</yellow>")
+      sb.append("  <gray>cancelled:</gray> <yellow>").append(st.cancelled()).append("</yellow> ")
+        .append("<gray>allowed:</gray> <yellow>").append(st.allowed()).append("</yellow> ")
+        .append("<gray>ai-skipped:</gray> <yellow>").append(st.aiSkipped()).append("</yellow>")
         .append("\n");
     } else {
-      sb.append("<gray>Spawn throttle:</gray> <red>disabled</red>\n");
+      sb.append("<yellow><bold>Spawn/AI</bold></yellow>\n  <red>disabled</red>\n");
     }
 
     return sb.toString();

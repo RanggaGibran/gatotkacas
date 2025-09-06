@@ -25,6 +25,14 @@ public final class PacketCullingReflectService {
     private Object protocolManager; // com.comphenix.protocol.ProtocolManager
     private Object packetListener;  // com.comphenix.protocol.events.PacketListener (dynamic proxy)
 
+    // Small LRU cache for recent (viewerId, x, y, z) decisions to avoid duplicate math
+    private final java.util.Map<Long, Boolean> decisionCache = new java.util.LinkedHashMap<>(256, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(java.util.Map.Entry<Long, Boolean> eldest) {
+            return size() > 512; // cap
+        }
+    };
+
     public PacketCullingReflectService(Plugin plugin, Logger logger, CullingService culling) {
         this.plugin = plugin;
         this.logger = logger;
@@ -139,7 +147,22 @@ public final class PacketCullingReflectService {
                         double cos = view.dot(dir);
                         double speed = 0.0;
 
-                        if (culling.quickShouldCull(distance, speed, cos)) {
+                        // Build a compact key: 24 bits per coord after quantization + 16 bits of viewer hash
+                        long key = 0L;
+                        try {
+                            int qx = (int) Math.round(x * 4.0); // quarter-block precision
+                            int qy = (int) Math.round(y * 4.0);
+                            int qz = (int) Math.round(z * 4.0);
+                            int vh = viewer.getUniqueId().hashCode() & 0xFFFF;
+                            key = (((long) (qx & 0xFFFFFF)) << 40) | (((long) (qy & 0xFFFFFF)) << 16) | ((long) (qz & 0xFFFF)) | (((long) vh) << 56);
+                        } catch (Throwable ignore) {}
+
+                        Boolean cached;
+                        synchronized (decisionCache) { cached = decisionCache.get(key); }
+                        boolean shouldCull = cached != null ? cached : culling.quickShouldCull(distance, speed, cos);
+                        if (cached == null) { synchronized (decisionCache) { decisionCache.put(key, shouldCull); } }
+
+                        if (shouldCull) {
                             // event.setCancelled(true)
                             packetEventCls.getMethod("setCancelled", boolean.class).invoke(packetEvent, true);
                         }

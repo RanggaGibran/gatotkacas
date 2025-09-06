@@ -51,6 +51,14 @@
 		</dependency>
 
 		<!-- ProtocolLib can be added later for packet culling; kept out by default to avoid resolution issues. -->
+
+		<!-- bStats (metrics) - shaded to avoid classpath conflicts -->
+		<dependency>
+			<groupId>org.bstats</groupId>
+			<artifactId>bstats-bukkit</artifactId>
+			<version>3.0.2</version>
+			<scope>compile</scope>
+		</dependency>
 	</dependencies>
 
 	<build>
@@ -66,7 +74,63 @@
 					</excludes>
 				</configuration>
 			</plugin>
-			<!-- No shading required; Paper provides Adventure libs. -->
+			<!-- Shade bStats classes into plugin to ensure availability -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-shade-plugin</artifactId>
+				<version>3.5.2</version>
+				<executions>
+					<execution>
+						<phase>package</phase>
+						<goals><goal>shade</goal></goals>
+						<configuration>
+							<relocations>
+								<relocation>
+									<pattern>org.bstats</pattern>
+									<shadedPattern>id.rnggagib.libs.bstats</shadedPattern>
+								</relocation>
+							</relocations>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
 		</plugins>
 	</build>
+
+	<!-- Optional profile to build with ProtocolLib-based listener -->
+	<profiles>
+		<profile>
+			<id>with-protocollib</id>
+			<activation>
+				<property>
+					<name>with-protocollib</name>
+				</property>
+			</activation>
+			<repositories>
+				<repository>
+					<id>dmulloy2-repo</id>
+					<url>https://repo.dmulloy2.net/nexus/repository/public/</url>
+				</repository>
+			</repositories>
+			<dependencies>
+				<dependency>
+					<groupId>com.comphenix.protocol</groupId>
+					<artifactId>ProtocolLib</artifactId>
+					<version>5.1.0</version>
+					<scope>provided</scope>
+				</dependency>
+			</dependencies>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-compiler-plugin</artifactId>
+						<configuration>
+							<excludes/>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>
