@@ -15,7 +15,7 @@ jobs:
   build-and-release:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-2022, macos-latest]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -63,6 +63,7 @@ jobs:
 
       - name: Create or update GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             artifacts/*
@@ -70,3 +71,10 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload CI artifacts (non-tag pushes)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: culling-rs-${{ runner.os }}-${{ github.sha }}
+          path: artifacts/*
