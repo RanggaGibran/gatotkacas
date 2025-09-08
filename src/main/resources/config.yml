@@ -64,8 +64,14 @@ features:
 
   # Cancel spawn packets for culled entities (requires ProtocolLib on server)
   packet-culling:
-    enabled: false
+    enabled: true
     exclude-types: ["PLAYER", "ARMOR_STAND"]
+    budget:
+      enabled: true
+      max-spawns-per-tick: 20     # per-player spawn packets allowed each tick
+      always-send-within: 12.0    # always allow if within this distance to player
+      queue-cap: 256              # per-player queued spawn packets cap; drop farthest when full
+      queue-ttl-ticks: 100        # drop queued packets older than this
 
   # Visual item stack holograms with countdown auto-clear
   item-stacks:
@@ -83,7 +89,11 @@ features:
     # Velocity impulse magnitude applied per tick toward leader (blocks/tick)
     pull-strength: 0.22
     # If within this distance to leader, snap-teleport to leader to force merge
-    pull-teleport-distance: 0.35
+  pull-teleport-distance: 0.35
+  # Hologram readability options
+  holo-full-bright: true
+  holo-background-alpha: 170
+  holo-line-width: 180
 
   # Adapt view/simulation distance based on MSPT
   adaptive-distance:
@@ -101,6 +111,26 @@ features:
     enabled: true
     window-ticks: 200
     toggle-limit: 500
+    # When a chunk exceeds the limit, we back off redstone for a cooldown with exponential backoff,
+    # but still allow 1 in N pulses to pass so farms can progress slowly without lag spikes.
+    cooldown-initial-ticks: 100
+    cooldown-max-ticks: 1200
+    backoff-multiplier: 2.0
+    duty-pass-every: 5
+    notification:
+      enabled: true
+      # how long the hologram stays (seconds)
+      ttl-seconds: 300
+      # per-chunk cooldown before showing another hologram (seconds)
+  cooldown-seconds: 120
+  # visual tweaks for readability
+  full-bright: true           # force max brightness so text is bright at night/shade
+  background-alpha: 190       # 0-255 alpha for dark background rectangle
+  line-width: 240             # pixels before wrapping; higher = fewer wraps
+  # safety limits
+  max-active: 64              # global cap of active redstone holograms
+  replace-oldest-when-full: false  # if true, evict the oldest when at cap; otherwise skip
+  min-update-interval-ticks: 20    # rate-limit text refresh when spammed by the same chunk
 
   # Skip creature spawns when no nearby players
   spawn-throttle:
@@ -112,6 +142,22 @@ features:
       radius: 80.0
       period-ticks: 40
       max-per-tick: 200
+
+  # XP orb + Projectile sweeper (merge/cap per chunk, orphan-despawn)
+  sweeper:
+    enabled: true
+    period-ticks: 40            # how often to run
+    player-radius: 64.0         # orbs/projectiles farther than this from any player are orphans
+    min-age-ticks: 60           # don't touch very fresh entities
+    xp:
+      merge-radius: 2.5         # merge orbs within this radius
+      max-per-chunk: 64         # hard cap per chunk after merging
+      max-merge-per-tick: 128   # safety processing cap per run
+    projectile:
+      types: ["ARROW", "TRIDENT", "SNOWBALL"]
+      merge-radius: 2.0         # collapse tight clusters; keep one, remove others
+      max-per-chunk: 96         # hard cap per chunk
+      max-remove-per-tick: 128  # safety processing cap per run
 
 # Small server-side tweaks
 tweaks:

@@ -32,6 +32,10 @@ public final class ItemStackHologramService {
     private boolean pullEnabled;
     private double pullStrength; // blocks per tick as velocity impulse magnitude
     private double pullTeleportDistance; // if within this, snap-teleport to leader
+    // visual
+    private boolean holoFullBright;
+    private int holoBgAlpha;
+    private int holoLineWidth;
 
     private final Map<UUID, UUID> leaderToHolo = new HashMap<>();
     private final Map<UUID, Long> leaderExpiresAt = new HashMap<>(); // epoch ms
@@ -52,6 +56,10 @@ public final class ItemStackHologramService {
     pullEnabled = cfg.getBoolean("features.item-stacks.pull-enabled", true);
     pullStrength = Math.max(0.0, cfg.getDouble("features.item-stacks.pull-strength", 0.22));
     pullTeleportDistance = Math.max(0.0, cfg.getDouble("features.item-stacks.pull-teleport-distance", 0.35));
+    // visual
+    holoFullBright = cfg.getBoolean("features.item-stacks.holo-full-bright", true);
+    holoBgAlpha = Math.min(255, Math.max(0, cfg.getInt("features.item-stacks.holo-background-alpha", 170)));
+    holoLineWidth = Math.max(80, cfg.getInt("features.item-stacks.holo-line-width", 180));
     }
 
     public void start() {
@@ -234,10 +242,17 @@ public final class ItemStackHologramService {
         td = w.spawn(loc, TextDisplay.class, d -> {
             d.text(Component.text(""));
             d.setBillboard(org.bukkit.entity.Display.Billboard.CENTER);
-            d.setShadowed(true);
+            d.setShadowed(false);
+            try { d.setAlignment(TextDisplay.TextAlignment.CENTER); } catch (Throwable ignored) {}
+            try { d.setTextOpacity((byte) 0xFF); } catch (Throwable ignored) {}
+            try { d.setViewRange(24.0f); } catch (Throwable ignored) {}
+            try { d.setInterpolationDelay(0); } catch (Throwable ignored) {}
+            try { d.setInterpolationDuration(0); } catch (Throwable ignored) {}
             try { d.setSeeThrough(true); } catch (Throwable ignored) {}
             try { d.setDefaultBackground(false); } catch (Throwable ignored) {}
-            try { d.setBackgroundColor(Color.fromARGB(100, 0, 0, 0)); } catch (Throwable ignored) {}
+            try { d.setLineWidth(holoLineWidth); } catch (Throwable ignored) {}
+            try { d.setBackgroundColor(Color.fromARGB(holoBgAlpha, 0, 0, 0)); } catch (Throwable ignored) {}
+            if (holoFullBright) { try { d.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15)); } catch (Throwable ignored) {} }
         });
         leaderToHolo.put(leaderId, td.getUniqueId());
         return td;
@@ -269,9 +284,7 @@ public final class ItemStackHologramService {
 
     private Component formatText(Material mat, int count, int secs) {
         String nice = toNiceName(mat);
-        String mm = "<gradient:#A1E3FF:#7C4DFF><bold>" + nice + "</bold></gradient> " +
-                "<gray>" + count + "x</gray> " +
-                "<gradient:#06D6A0:#118AB2>[<white>" + secs + "</white>]</gradient>";
+    String mm = "<white>" + nice + "</white> <yellow>x" + count + "</yellow> <white>[" + secs + "]</white>";
         return MiniMessage.miniMessage().deserialize(mm);
     }
 

@@ -10,6 +10,7 @@ import id.rnggagib.performance.SpawnThrottleService;
 import id.rnggagib.tweaks.RedstoneGuardService;
 import id.rnggagib.performance.PacketCullingReflectService;
 import id.rnggagib.tweaks.ItemStackHologramService;
+import id.rnggagib.tweaks.SweeperService;
 import org.bukkit.plugin.java.JavaPlugin;
 // bStats (shade will relocate packages at build time)
 import org.bstats.bukkit.Metrics;
@@ -28,6 +29,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   private RedstoneGuardService redstoneGuardService;
   private PacketCullingReflectService packetCullingService;
   private ItemStackHologramService itemStackHologramService;
+  private SweeperService sweeperService;
   private Metrics bstats;
 
   @Override
@@ -142,6 +144,11 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   itemStackHologramService.loadFromConfig();
   itemStackHologramService.start();
 
+  // XP/Projectile sweeper
+  sweeperService = new SweeperService(this, getSLF4JLogger());
+  sweeperService.loadFromConfig();
+  sweeperService.start();
+
 
   // Adaptive view/sim distance based on MSPT
   adaptiveDistanceService = new AdaptiveDistanceService(this, getSLF4JLogger(), tickMonitor);
@@ -177,6 +184,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   if (redstoneGuardService != null) redstoneGuardService.stop();
   if (packetCullingService != null) packetCullingService.stop();
   if (itemStackHologramService != null) itemStackHologramService.stop();
+  if (sweeperService != null) sweeperService.stop();
     getSLF4JLogger().info("gatotkacas disabled");
   }
 
@@ -235,6 +243,10 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
     if (itemStackHologramService != null) {
       itemStackHologramService.loadFromConfig();
       itemStackHologramService.start();
+    }
+    if (sweeperService != null) {
+      sweeperService.loadFromConfig();
+      sweeperService.start();
     }
   }
 

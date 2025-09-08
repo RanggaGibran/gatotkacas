@@ -20,10 +20,19 @@ public final class PacketCullingReflectService {
     private final Logger logger;
     private final CullingService culling;
     private boolean enabled;
+    // Budget config
+    private boolean budgetEnabled;
+    private int budgetMaxPerTick;
+    private double budgetAlwaysSendWithin;
+    private int budgetQueueCap;
+    private int budgetQueueTtlTicks;
     // kept for future use if we decode entity type from packet
     // private Set<String> excludeTypes = Set.of("PLAYER", "ARMOR_STAND");
     private Object protocolManager; // com.comphenix.protocol.ProtocolManager
     private Object packetListener;  // com.comphenix.protocol.events.PacketListener (dynamic proxy)
+    private Method sendServerPacketMethod; // ProtocolManager#sendServerPacket(Player, PacketContainer)
+    private Class<?> packetContainerCls;
+    private int drainTask = -1;
 
     // Small LRU cache for recent (viewerId, x, y, z) decisions to avoid duplicate math
     private final java.util.Map<Long, Boolean> decisionCache = new java.util.LinkedHashMap<>(256, 0.75f, true) {
@@ -32,6 +41,15 @@ public final class PacketCullingReflectService {
             return size() > 512; // cap
         }
     };
+
+    // Budget state
+    private long tickNow = 0L;
+    private final java.util.Map<java.util.UUID, Integer> sentThisTick = new java.util.HashMap<>();
+    private final java.util.Map<java.util.UUID, java.util.ArrayDeque<Queued>> queuedByPlayer = new java.util.HashMap<>();
+    private static final class Queued {
+        final Object container; final long tick; final double dist;
+        Queued(Object c, long t, double d) { this.container = c; this.tick = t; this.dist = d; }
+    }
 
     public PacketCullingReflectService(Plugin plugin, Logger logger, CullingService culling) {
         this.plugin = plugin;
@@ -42,6 +60,12 @@ public final class PacketCullingReflectService {
     public void loadFromConfig() {
         var cfg = plugin.getConfig();
         enabled = cfg.getBoolean("features.packet-culling.enabled", false);
+    // Budget
+    budgetEnabled = cfg.getBoolean("features.packet-culling.budget.enabled", false);
+    budgetMaxPerTick = Math.max(1, cfg.getInt("features.packet-culling.budget.max-spawns-per-tick", 20));
+    budgetAlwaysSendWithin = Math.max(0.0, cfg.getDouble("features.packet-culling.budget.always-send-within", 12.0));
+    budgetQueueCap = Math.max(8, cfg.getInt("features.packet-culling.budget.queue-cap", 256));
+    budgetQueueTtlTicks = Math.max(20, cfg.getInt("features.packet-culling.budget.queue-ttl-ticks", 100));
     // Exclude types configurable for future packet type decoding; currently unused in reflection mode
     }
 
@@ -76,7 +100,8 @@ public final class PacketCullingReflectService {
             Class<?> listeningWhitelistCls = Class.forName("com.comphenix.protocol.events.ListeningWhitelist", false, cl);
             Class<?> packetListenerItf = Class.forName("com.comphenix.protocol.events.PacketListener", false, cl);
             Class<?> packetEventCls = Class.forName("com.comphenix.protocol.events.PacketEvent", false, cl);
-            Class<?> packetContainerCls = Class.forName("com.comphenix.protocol.events.PacketContainer", false, cl);
+            packetContainerCls = Class.forName("com.comphenix.protocol.events.PacketContainer", false, cl);
+            try { sendServerPacketMethod = protocolManager.getClass().getMethod("sendServerPacket", Player.class, packetContainerCls); } catch (Throwable ignored) {}
 
             // Packet types: SPAWN_ENTITY and SPAWN_ENTITY_LIVING (if present)
             Object spawnEntity = packetTypePlayServerCls.getField("SPAWN_ENTITY").get(null);
@@ -105,15 +130,23 @@ public final class PacketCullingReflectService {
             Object priorityNormal = listenerPriorityCls.getMethod("valueOf", String.class).invoke(null, "NORMAL");
             bPriority.invoke(builder, priorityNormal);
 
-            Object typesArray;
-            if (spawnLiving != null) {
-                typesArray = Array.newInstance(packetTypeCls, 2);
-                Array.set(typesArray, 0, spawnEntity);
-                Array.set(typesArray, 1, spawnLiving);
-            } else {
-                typesArray = Array.newInstance(packetTypeCls, 1);
-                Array.set(typesArray, 0, spawnEntity);
+            // Filter only supported packet types to avoid "unknown packet" warnings on newer MC where living packet was merged
+            java.util.List<Object> supported = new java.util.ArrayList<>();
+            try {
+                Method isSupported = packetTypeCls.getMethod("isSupported");
+                if ((boolean) isSupported.invoke(spawnEntity)) supported.add(spawnEntity);
+                if (spawnLiving != null && (boolean) isSupported.invoke(spawnLiving)) supported.add(spawnLiving);
+            } catch (Throwable ignore) {
+                // If API lacks isSupported, fall back to SPAWN_ENTITY only
+                supported.clear();
+                supported.add(spawnEntity);
             }
+            if (supported.isEmpty()) {
+                logger.info("Packet culling: no supported spawn packet types on this server; skipping registration");
+                return;
+            }
+            Object typesArray = Array.newInstance(packetTypeCls, supported.size());
+            for (int i = 0; i < supported.size(); i++) Array.set(typesArray, i, supported.get(i));
             bTypes.invoke(builder, typesArray);
             Object sendingWhitelist = bBuild.invoke(builder);
 
@@ -123,10 +156,18 @@ public final class PacketCullingReflectService {
             Object receivingWhitelist = bBuild.invoke(recvBuilder);
 
             // Create dynamic proxy for PacketListener
-        packetListener = Proxy.newProxyInstance(cl, new Class[]{packetListenerItf}, new InvocationHandler() {
+    packetListener = Proxy.newProxyInstance(cl, new Class[]{packetListenerItf}, new InvocationHandler() {
                 @Override
                 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
                     String name = method.getName();
+                    // Handle Object methods to keep Proxy stable in collections
+                    if (method.getDeclaringClass() == Object.class) {
+                        switch (name) {
+                            case "hashCode": return System.identityHashCode(proxy);
+                            case "equals": return proxy == (args != null && args.length > 0 ? args[0] : null);
+                            case "toString": return "GatotkacasPacketListenerProxy";
+                        }
+                    }
                     if (name.equals("getPlugin")) return plugin;
             if (name.equals("getPriority")) return priorityNormal;
                     if (name.equals("getListeningWhitelist") || name.equals("getSendingWhitelist")) return sendingWhitelist;
@@ -176,6 +217,42 @@ public final class PacketCullingReflectService {
                         boolean shouldCull = cached != null ? cached : culling.quickShouldCull(distance, speed, cos);
                         if (cached == null) { synchronized (decisionCache) { decisionCache.put(key, shouldCull); } }
 
+                        // Budget check (applies only when we can re-send later)
+                        if (budgetEnabled && sendServerPacketMethod != null && !shouldCull) {
+                            if (distance > budgetAlwaysSendWithin) {
+                                java.util.UUID pid = viewer.getUniqueId();
+                                int used; synchronized (sentThisTick) { used = sentThisTick.getOrDefault(pid, 0); }
+                                if (used >= budgetMaxPerTick) {
+                                    // enqueue and cancel
+                                    Object copy = container;
+                                    try {
+                                        Method deepClone = packetContainerCls.getMethod("deepClone");
+                                        copy = deepClone.invoke(container);
+                                    } catch (Throwable __) {
+                                        try { Method shallow = packetContainerCls.getMethod("shallowClone"); copy = shallow.invoke(container); } catch (Throwable ___) { /* fallback to same ref */ }
+                                    }
+                                    synchronized (queuedByPlayer) {
+                                        var dq = queuedByPlayer.computeIfAbsent(pid, k -> new java.util.ArrayDeque<Queued>());
+                                        dq.addLast(new Queued(copy, tickNow, distance));
+                                        // enforce cap: drop farthest when full
+                                        if (dq.size() > budgetQueueCap) {
+                                            // find farthest and remove it
+                                            Queued far = null; for (Queued q : dq) if (far == null || q.dist > far.dist) far = q;
+                                            if (far != null) dq.remove(far);
+                                        }
+                                    }
+                                    packetEventCls.getMethod("setCancelled", boolean.class).invoke(packetEvent, true);
+                                    return null;
+                                } else {
+                                    synchronized (sentThisTick) { sentThisTick.put(pid, used + 1); }
+                                }
+                            } else {
+                                // within always-send range: bypass budget but still count a bit to avoid abuse
+                                java.util.UUID pid = viewer.getUniqueId();
+                                int used; synchronized (sentThisTick) { used = sentThisTick.getOrDefault(pid, 0); sentThisTick.put(pid, used + 1); }
+                            }
+                        }
+
                         if (shouldCull) {
                             // event.setCancelled(true)
                             packetEventCls.getMethod("setCancelled", boolean.class).invoke(packetEvent, true);
@@ -190,7 +267,42 @@ public final class PacketCullingReflectService {
             // protocolManager.addPacketListener(PacketListener)
             Method add = protocolManager.getClass().getMethod("addPacketListener", packetListener.getClass().getInterfaces()[0]);
             add.invoke(protocolManager, packetListener);
-            logger.info("Packet culling enabled (ProtocolLib via reflection)");
+            logger.info("Packet culling enabled ({} packet type(s)){}", java.lang.Integer.valueOf(supported.size()), budgetEnabled ? " with per-player budget" : "");
+
+            // Tick task to advance time and drain queues
+            drainTask = org.bukkit.Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
+                tickNow++;
+                // Reset counters each tick
+                synchronized (sentThisTick) { sentThisTick.clear(); }
+                if (!budgetEnabled || sendServerPacketMethod == null) return;
+                synchronized (queuedByPlayer) {
+                    for (var entry : new java.util.ArrayList<>(queuedByPlayer.entrySet())) {
+                        java.util.UUID pid = entry.getKey();
+                        var dq = entry.getValue();
+                        Player p = org.bukkit.Bukkit.getPlayer(pid);
+                        if (p == null || !p.isOnline()) { dq.clear(); continue; }
+                        int sent = 0;
+                        // Drop expired
+                        dq.removeIf(q -> (tickNow - q.tick) > budgetQueueTtlTicks);
+                        while (!dq.isEmpty() && sent < budgetMaxPerTick) {
+                            // pick nearest first to feel responsive
+                            Queued best = null;
+                            for (Queued q : dq) { if (best == null || q.dist < best.dist) { best = q; } }
+                            if (best == null) break;
+                            // remove by index from deque: fallback to remove(best)
+                            boolean removed = dq.remove(best);
+                            if (!removed) {
+                                // should not happen, but guard
+                                best = dq.pollFirst();
+                                if (best == null) break;
+                            }
+                            try { sendServerPacketMethod.invoke(protocolManager, p, best.container); } catch (Throwable ignored) {}
+                            sent++;
+                        }
+                        if (dq.isEmpty()) queuedByPlayer.remove(pid);
+                    }
+                }
+            }, 1L, 1L);
         } catch (Throwable t) {
             logger.warn("Failed to enable packet culling via reflection", t);
         }
@@ -204,5 +316,7 @@ public final class PacketCullingReflectService {
             } catch (Throwable ignored) { }
             packetListener = null;
         }
+        if (drainTask != -1) { org.bukkit.Bukkit.getScheduler().cancelTask(drainTask); drainTask = -1; }
+        queuedByPlayer.clear(); sentThisTick.clear(); decisionCache.clear();
     }
 }
