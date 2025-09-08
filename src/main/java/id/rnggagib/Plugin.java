@@ -9,6 +9,7 @@ import id.rnggagib.performance.AdaptiveDistanceService;
 import id.rnggagib.performance.SpawnThrottleService;
 import id.rnggagib.tweaks.RedstoneGuardService;
 import id.rnggagib.performance.PacketCullingReflectService;
+import id.rnggagib.tweaks.ItemStackHologramService;
 import org.bukkit.plugin.java.JavaPlugin;
 // bStats (shade will relocate packages at build time)
 import org.bstats.bukkit.Metrics;
@@ -26,6 +27,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   private SpawnThrottleService spawnThrottleService;
   private RedstoneGuardService redstoneGuardService;
   private PacketCullingReflectService packetCullingService;
+  private ItemStackHologramService itemStackHologramService;
   private Metrics bstats;
 
   @Override
@@ -135,6 +137,11 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   tweaksService.loadFromConfig();
   tweaksService.start();
 
+  // Visual item stacks with holograms and countdown
+  itemStackHologramService = new ItemStackHologramService(this, getSLF4JLogger());
+  itemStackHologramService.loadFromConfig();
+  itemStackHologramService.start();
+
 
   // Adaptive view/sim distance based on MSPT
   adaptiveDistanceService = new AdaptiveDistanceService(this, getSLF4JLogger(), tickMonitor);
@@ -169,6 +176,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   if (spawnThrottleService != null) spawnThrottleService.stop();
   if (redstoneGuardService != null) redstoneGuardService.stop();
   if (packetCullingService != null) packetCullingService.stop();
+  if (itemStackHologramService != null) itemStackHologramService.stop();
     getSLF4JLogger().info("gatotkacas disabled");
   }
 
@@ -223,6 +231,10 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
     if (packetCullingService != null) {
       packetCullingService.loadFromConfig();
       packetCullingService.start();
+    }
+    if (itemStackHologramService != null) {
+      itemStackHologramService.loadFromConfig();
+      itemStackHologramService.start();
     }
   }
 

@@ -8,7 +8,7 @@ messages:
 
 features:
   bstats:
-    enabled: false
+    enabled: true
     # Get a service id at https://bstats.org/ for your plugin
     service-id: 0
   native:
@@ -67,9 +67,27 @@ features:
     enabled: false
     exclude-types: ["PLAYER", "ARMOR_STAND"]
 
+  # Visual item stack holograms with countdown auto-clear
+  item-stacks:
+    enabled: true
+    # Group radius in blocks for similar items
+    radius: 3.0
+    # Seconds before auto-clear once no new items join the stack
+    lifetime-seconds: 60
+    # How often to update holograms (ticks)
+    update-period-ticks: 5
+    # Minimum total count before showing a hologram
+    min-count-to-show: 5
+    # Pull nearby similar items toward the stack leader to merge faster
+    pull-enabled: true
+    # Velocity impulse magnitude applied per tick toward leader (blocks/tick)
+    pull-strength: 0.22
+    # If within this distance to leader, snap-teleport to leader to force merge
+    pull-teleport-distance: 0.35
+
   # Adapt view/simulation distance based on MSPT
   adaptive-distance:
-    enabled: false
+    enabled: true
     high-mspt: 45.0
     low-mspt: 30.0
     min-view-distance: 6
@@ -80,17 +98,17 @@ features:
 
   # Redstone guard to reduce clock spam
   redstone-guard:
-    enabled: false
+    enabled: true
     window-ticks: 200
     toggle-limit: 500
 
   # Skip creature spawns when no nearby players
   spawn-throttle:
-    enabled: false
+    enabled: true
     player-radius: 48.0
     reasons: ["NATURAL", "SPAWNER"]
     ai:
-      enabled: false
+      enabled: true
       radius: 80.0
       period-ticks: 40
       max-per-tick: 200
@@ -99,10 +117,10 @@ features:
 tweaks:
   enabled: true
   hopper:
-    throttle-enabled: false
+    throttle-enabled: true
     interval-ticks: 8
   item:
-    aggressive-merge-enabled: false
+    aggressive-merge-enabled: true
     merge-radius: 1.5
     max-merge-per-tick: 128
   # Optional per-world tracking range hints (blocks); 0 to ignore
