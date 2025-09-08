@@ -156,6 +156,31 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   particleLimitService.loadFromConfig();
   particleLimitService.start();
 
+  // Register /plimit via CommandMap so it's available immediately
+  org.bukkit.command.Command plCmd = new org.bukkit.command.Command(
+      "plimit",
+      "Open particle limit GUI",
+      "/plimit",
+      java.util.List.of()
+  ) {
+    @Override
+    public boolean execute(@org.jetbrains.annotations.NotNull org.bukkit.command.CommandSender sender,
+                           @org.jetbrains.annotations.NotNull String label,
+                           String[] args) {
+  if (!testPermission(sender)) return true;
+  return particleLimitService.onCommand(sender, this, label, args);
+    }
+
+    @Override
+    public java.util.@org.jetbrains.annotations.NotNull List<String> tabComplete(@org.jetbrains.annotations.NotNull org.bukkit.command.CommandSender sender,
+                                                                                @org.jetbrains.annotations.NotNull String alias,
+                                                                                String[] args) {
+      return particleLimitService.onTabComplete(sender, this, alias, args);
+    }
+  };
+  plCmd.setPermission("gatotkacas.plimit");
+  org.bukkit.Bukkit.getCommandMap().register(getName().toLowerCase(), plCmd);
+
 
   // Adaptive view/sim distance based on MSPT
   adaptiveDistanceService = new AdaptiveDistanceService(this, getSLF4JLogger(), tickMonitor);
