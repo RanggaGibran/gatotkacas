@@ -106,6 +106,8 @@ public final class PacketCullingReflectService {
             // Packet types: SPAWN_ENTITY and SPAWN_ENTITY_LIVING (if present)
             Object spawnEntity = packetTypePlayServerCls.getField("SPAWN_ENTITY").get(null);
             Object spawnLiving;
+            Object worldParticles = null;
+            try { worldParticles = packetTypePlayServerCls.getField("WORLD_PARTICLES").get(null); } catch (Throwable ignored) {}
             try {
                 spawnLiving = packetTypePlayServerCls.getField("SPAWN_ENTITY_LIVING").get(null);
             } catch (NoSuchFieldException nsf) {
@@ -136,6 +138,7 @@ public final class PacketCullingReflectService {
                 Method isSupported = packetTypeCls.getMethod("isSupported");
                 if ((boolean) isSupported.invoke(spawnEntity)) supported.add(spawnEntity);
                 if (spawnLiving != null && (boolean) isSupported.invoke(spawnLiving)) supported.add(spawnLiving);
+                if (worldParticles != null && (boolean) isSupported.invoke(worldParticles)) supported.add(worldParticles);
             } catch (Throwable ignore) {
                 // If API lacks isSupported, fall back to SPAWN_ENTITY only
                 supported.clear();
@@ -156,7 +159,8 @@ public final class PacketCullingReflectService {
             Object receivingWhitelist = bBuild.invoke(recvBuilder);
 
             // Create dynamic proxy for PacketListener
-    packetListener = Proxy.newProxyInstance(cl, new Class[]{packetListenerItf}, new InvocationHandler() {
+            final Object worldParticlesFinal = worldParticles; // capture for inner
+            packetListener = Proxy.newProxyInstance(cl, new Class[]{packetListenerItf}, new InvocationHandler() {
                 @Override
                 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
                     String name = method.getName();
@@ -179,6 +183,20 @@ public final class PacketCullingReflectService {
                         if (cancelled) return null;
                         Player viewer = (Player) packetEventCls.getMethod("getPlayer").invoke(packetEvent);
                         Object container = packetEventCls.getMethod("getPacket").invoke(packetEvent);
+                        Object ptype = packetEventCls.getMethod("getPacketType").invoke(packetEvent);
+                        // Particle downsampling first
+                        if (worldParticlesFinal != null && ptype.equals(worldParticlesFinal)) {
+                            int pct = 100;
+                            try { pct = ((id.rnggagib.Plugin) plugin).particlePercent(viewer); } catch (Throwable ignored) {}
+                            if (pct <= 0) { packetEventCls.getMethod("setCancelled", boolean.class).invoke(packetEvent, true); return null; }
+                            if (pct >= 100) return null;
+                            // sample by hash for stability: player + current tick
+                            int h = viewer.getUniqueId().hashCode() ^ (int) tickNow;
+                            h = (h ^ (h >>> 16)) & 0x7fffffff;
+                            int r = h % 100;
+                            if (r >= pct) { packetEventCls.getMethod("setCancelled", boolean.class).invoke(packetEvent, true); }
+                            return null;
+                        }
 
                         // Extract position doubles if present (indices differ by packet type, fallback safe reads)
                         double x = 0, y = 0, z = 0;

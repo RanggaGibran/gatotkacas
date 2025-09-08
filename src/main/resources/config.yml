@@ -65,6 +65,10 @@ features:
   # Cancel spawn packets for culled entities (requires ProtocolLib on server)
   packet-culling:
     enabled: true
+
+  # Client-side particle limiter via GUI (/plimit)
+  particle-limit:
+    enabled: true
     exclude-types: ["PLAYER", "ARMOR_STAND"]
     budget:
       enabled: true

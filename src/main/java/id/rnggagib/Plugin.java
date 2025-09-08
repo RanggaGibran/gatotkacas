@@ -11,6 +11,7 @@ import id.rnggagib.tweaks.RedstoneGuardService;
 import id.rnggagib.performance.PacketCullingReflectService;
 import id.rnggagib.tweaks.ItemStackHologramService;
 import id.rnggagib.tweaks.SweeperService;
+import id.rnggagib.ui.ParticleLimitService;
 import org.bukkit.plugin.java.JavaPlugin;
 // bStats (shade will relocate packages at build time)
 import org.bstats.bukkit.Metrics;
@@ -30,6 +31,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   private PacketCullingReflectService packetCullingService;
   private ItemStackHologramService itemStackHologramService;
   private SweeperService sweeperService;
+  private ParticleLimitService particleLimitService;
   private Metrics bstats;
 
   @Override
@@ -149,6 +151,11 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   sweeperService.loadFromConfig();
   sweeperService.start();
 
+  // Per-player particle limit GUI
+  particleLimitService = new ParticleLimitService(this, getSLF4JLogger());
+  particleLimitService.loadFromConfig();
+  particleLimitService.start();
+
 
   // Adaptive view/sim distance based on MSPT
   adaptiveDistanceService = new AdaptiveDistanceService(this, getSLF4JLogger(), tickMonitor);
@@ -185,6 +192,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   if (packetCullingService != null) packetCullingService.stop();
   if (itemStackHologramService != null) itemStackHologramService.stop();
   if (sweeperService != null) sweeperService.stop();
+  if (particleLimitService != null) particleLimitService.stop();
     getSLF4JLogger().info("gatotkacas disabled");
   }
 
@@ -248,6 +256,10 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
       sweeperService.loadFromConfig();
       sweeperService.start();
     }
+    if (particleLimitService != null) {
+      particleLimitService.loadFromConfig();
+      particleLimitService.start();
+    }
   }
 
   @Override
@@ -277,6 +289,12 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   public int windowProcessed() { return cullingService != null ? cullingService.getWindowProcessed() : 0; }
   public double windowRatio() { return cullingService != null ? cullingService.getWindowRatio() : 0.0; }
   public boolean ratioPercent() { return cullingService != null && cullingService.isRatioPercent(); }
+
+  // Exposed for reflection packet layer (particle downsample)
+  public int particlePercent(org.bukkit.entity.Player p) {
+    if (particleLimitService == null) return 100;
+    return particleLimitService.getPercent(p);
+  }
 
   @Override
   public String diag() {
