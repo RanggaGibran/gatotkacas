@@ -17,6 +17,7 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 
 import java.util.HashMap;
 import java.util.Map;
+import id.rnggagib.util.EntityUtils;
 
 public final class RedstoneGuardService implements Listener {
     private final Plugin plugin;
@@ -120,7 +121,7 @@ public final class RedstoneGuardService implements Listener {
             var toRemoveNotif = new java.util.ArrayList<Long>();
             for (var e : notifEntity.entrySet()) {
                 var uuid = e.getValue();
-                var td = findTextDisplay(uuid);
+                var td = EntityUtils.findTextDisplay(uuid);
                 if (td == null || td.isDead() || (lastNotifAtMillis.getOrDefault(e.getKey(), 0L) + notifTtlSeconds * 1000L) <= nowMs) {
                     if (td != null && !td.isDead()) td.remove();
                     toRemoveNotif.add(e.getKey());
@@ -145,7 +146,7 @@ public final class RedstoneGuardService implements Listener {
     cooldownTicksCurrent.clear();
         // Remove any active notifications
         for (var uuid : notifEntity.values()) {
-            var td = findTextDisplay(uuid);
+            var td = EntityUtils.findTextDisplay(uuid);
             if (td != null && !td.isDead()) td.remove();
         }
         lastNotifAtMillis.clear();
@@ -203,7 +204,7 @@ public final class RedstoneGuardService implements Listener {
         "\n<white>Laporkan ke admin jika ini mengganggu farm</white>";
         // If one already exists for this chunk, refresh it instead of spawning a new one
         java.util.UUID existingId = notifEntity.get(key);
-        TextDisplay existing = existingId != null ? findTextDisplay(existingId) : null;
+    TextDisplay existing = existingId != null ? EntityUtils.findTextDisplay(existingId) : null;
         if (existing != null && !existing.isDead()) {
             // rate limit text updates to avoid spammy edits
             long lastUpdateTick = lastTextUpdateTick.getOrDefault(key, -999999L);
@@ -238,7 +239,7 @@ public final class RedstoneGuardService implements Listener {
             }
             if (oldestKey != null) {
                 var uuidOld = notifEntity.remove(oldestKey);
-                var tdOld = uuidOld != null ? findTextDisplay(uuidOld) : null;
+                var tdOld = uuidOld != null ? EntityUtils.findTextDisplay(uuidOld) : null;
                 if (tdOld != null && !tdOld.isDead()) tdOld.remove();
                 lastNotifAtMillis.remove(oldestKey); notifAnchor.remove(oldestKey); notifBase.remove(oldestKey);
                 notifOrder.remove(oldestKey); lastTextUpdateTick.remove(oldestKey);
@@ -273,7 +274,7 @@ public final class RedstoneGuardService implements Listener {
         long nowMs = System.currentTimeMillis();
         for (var entry : notifEntity.entrySet()) {
             long key = entry.getKey();
-            var td = findTextDisplay(entry.getValue());
+        var td = EntityUtils.findTextDisplay(entry.getValue());
             if (td == null || td.isDead()) continue;
             long start = lastNotifAtMillis.getOrDefault(key, nowMs);
             long remaining = Math.max(0, (notifTtlSeconds * 1000L) - (nowMs - start));
@@ -287,13 +288,7 @@ public final class RedstoneGuardService implements Listener {
         }
     }
 
-    private TextDisplay findTextDisplay(java.util.UUID id) {
-        for (var w : Bukkit.getWorlds()) {
-            var e = w.getEntity(id);
-            if (e instanceof TextDisplay td) return td;
-        }
-        return null;
-    }
+    // findTextDisplay moved to EntityUtils
 
     public int throttledChunkCountLastWindow() { return throttledLastWindow; }
     public long suppressedToggleCount() { return suppressedCount; }

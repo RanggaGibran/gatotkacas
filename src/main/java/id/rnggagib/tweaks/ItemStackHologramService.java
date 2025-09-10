@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.bukkit.util.Vector;
 
 import java.util.*;
+import id.rnggagib.util.EntityUtils;
 
 /**
  * Visual item stacking with modern hologram and timed auto-clear to reduce lag.
@@ -22,6 +23,12 @@ public final class ItemStackHologramService {
     private final Plugin plugin;
     private final Logger logger;
     private int taskId = -1;
+
+    // Constants
+    private static final double HOLO_Y_OFFSET = 0.9;           // vertical offset above item entity
+    private static final float HOLO_VIEW_RANGE = 24.0f;        // default text display view range
+    private static final double PULL_MAX_SPEED = 0.7;          // clamp speed for pulled items
+    private static final double PULL_TELEPORT_Y_OFFSET = 0.05; // slight offset when snap-teleporting
 
     // Config
     private boolean enabled;
@@ -76,7 +83,7 @@ public final class ItemStackHologramService {
         }
         // Cleanup holograms
         for (var e : leaderToHolo.entrySet()) {
-            var holo = findTextDisplay(e.getValue());
+            var holo = EntityUtils.findTextDisplay(e.getValue());
             if (holo != null && !holo.isDead()) holo.remove();
         }
         leaderToHolo.clear();
@@ -160,7 +167,7 @@ public final class ItemStackHologramService {
                 Component text = formatText(leader.getItemStack().getType(), total, secs);
                 if (holo != null) {
                     holo.text(text);
-                    var loc = leader.getLocation().add(0, 0.9, 0);
+                    var loc = leader.getLocation().add(0, HOLO_Y_OFFSET, 0);
                     holo.teleport(loc);
                 }
 
@@ -175,14 +182,14 @@ public final class ItemStackHologramService {
                         if (dist < 1.0E-3) continue;
                         if (pullTeleportDistance > 0.0 && dist <= pullTeleportDistance) {
                             // Snap to near leader to force merge sooner
-                            it.teleport(leaderLoc.clone().add(0, 0.05, 0));
+                            it.teleport(leaderLoc.clone().add(0, PULL_TELEPORT_Y_OFFSET, 0));
                             continue;
                         }
                         if (pullStrength > 0.0) {
                             Vector impulse = delta.normalize().multiply(pullStrength);
                             Vector vel = it.getVelocity().add(impulse);
                             // clamp to avoid excessive speeds
-                            double max = 0.7;
+                            double max = PULL_MAX_SPEED;
                             if (vel.lengthSquared() > max*max) vel = vel.normalize().multiply(max);
                             it.setVelocity(vel);
                         }
@@ -197,7 +204,7 @@ public final class ItemStackHologramService {
         List<UUID> vanished = new ArrayList<>();
         for (var entry : leaderToHolo.entrySet()) {
             UUID lid = entry.getKey();
-            var ent = findItem(lid);
+            var ent = EntityUtils.findItem(lid);
             if (ent == null || ent.isDead() || !ent.isValid()) {
                 vanished.add(lid);
             }
@@ -236,16 +243,16 @@ public final class ItemStackHologramService {
 
     private TextDisplay ensureHolo(World w, Item leader, UUID leaderId) {
         UUID hid = leaderToHolo.get(leaderId);
-        TextDisplay td = hid != null ? findTextDisplay(hid) : null;
+        TextDisplay td = hid != null ? EntityUtils.findTextDisplay(hid) : null;
         if (td != null && td.isValid() && !td.isDead()) return td;
-        var loc = leader.getLocation().add(0, 0.9, 0);
+        var loc = leader.getLocation().add(0, HOLO_Y_OFFSET, 0);
         td = w.spawn(loc, TextDisplay.class, d -> {
             d.text(Component.text(""));
             d.setBillboard(org.bukkit.entity.Display.Billboard.CENTER);
             d.setShadowed(false);
             try { d.setAlignment(TextDisplay.TextAlignment.CENTER); } catch (Throwable ignored) {}
             try { d.setTextOpacity((byte) 0xFF); } catch (Throwable ignored) {}
-            try { d.setViewRange(24.0f); } catch (Throwable ignored) {}
+            try { d.setViewRange(HOLO_VIEW_RANGE); } catch (Throwable ignored) {}
             try { d.setInterpolationDelay(0); } catch (Throwable ignored) {}
             try { d.setInterpolationDuration(0); } catch (Throwable ignored) {}
             try { d.setSeeThrough(true); } catch (Throwable ignored) {}
@@ -261,25 +268,9 @@ public final class ItemStackHologramService {
     private void removeHolo(UUID leaderId) {
         UUID hid = leaderToHolo.remove(leaderId);
         if (hid != null) {
-            var td = findTextDisplay(hid);
+            var td = EntityUtils.findTextDisplay(hid);
             if (td != null && !td.isDead()) td.remove();
         }
-    }
-
-    private Item findItem(UUID id) {
-        for (World w : Bukkit.getWorlds()) {
-            var e = w.getEntity(id);
-            if (e instanceof Item it) return it;
-        }
-        return null;
-    }
-
-    private TextDisplay findTextDisplay(UUID id) {
-        for (World w : Bukkit.getWorlds()) {
-            var e = w.getEntity(id);
-            if (e instanceof TextDisplay td) return td;
-        }
-        return null;
     }
 
     private Component formatText(Material mat, int count, int secs) {
