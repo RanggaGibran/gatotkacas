@@ -163,6 +163,16 @@ features:
       max-per-chunk: 96         # hard cap per chunk
       max-remove-per-tick: 128  # safety processing cap per run
 
+  # Hopper microscheduler (token bucket per grid)
+  hopper-microscheduler:
+    enabled: true
+    grid-size-chunks: 2           # cell size in chunks (2x2 chunks)
+    base-credits-per-tick: 2      # base tokens per cell per tick
+    near-player-bonus: 3          # extra tokens for cells near players
+    player-radius: 64.0           # radius to consider player proximity
+    coalesce-window-ticks: 5      # suppress repeated src->dst moves within this window
+    max-burst: 8                  # cap stored tokens per cell
+
 # Small server-side tweaks
 tweaks:
   enabled: true

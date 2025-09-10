@@ -11,6 +11,7 @@ import id.rnggagib.tweaks.RedstoneGuardService;
 import id.rnggagib.performance.PacketCullingReflectService;
 import id.rnggagib.tweaks.ItemStackHologramService;
 import id.rnggagib.tweaks.SweeperService;
+import id.rnggagib.tweaks.HopperMicroschedulerService;
 import id.rnggagib.ui.ParticleLimitService;
 import org.bukkit.plugin.java.JavaPlugin;
 // bStats (shade will relocate packages at build time)
@@ -31,6 +32,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   private PacketCullingReflectService packetCullingService;
   private ItemStackHologramService itemStackHologramService;
   private SweeperService sweeperService;
+  private HopperMicroschedulerService hopperMicroschedulerService;
   private ParticleLimitService particleLimitService;
   private Metrics bstats;
 
@@ -151,6 +153,11 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   sweeperService.loadFromConfig();
   sweeperService.start();
 
+  // Hopper microscheduler
+  hopperMicroschedulerService = new HopperMicroschedulerService(this, getSLF4JLogger());
+  hopperMicroschedulerService.loadFromConfig();
+  hopperMicroschedulerService.start();
+
   // Per-player particle limit GUI
   particleLimitService = new ParticleLimitService(this, getSLF4JLogger());
   particleLimitService.loadFromConfig();
@@ -217,6 +224,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   if (packetCullingService != null) packetCullingService.stop();
   if (itemStackHologramService != null) itemStackHologramService.stop();
   if (sweeperService != null) sweeperService.stop();
+  if (hopperMicroschedulerService != null) hopperMicroschedulerService.stop();
   if (particleLimitService != null) particleLimitService.stop();
     getSLF4JLogger().info("gatotkacas disabled");
   }
@@ -280,6 +288,10 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
     if (sweeperService != null) {
       sweeperService.loadFromConfig();
       sweeperService.start();
+    }
+    if (hopperMicroschedulerService != null) {
+      hopperMicroschedulerService.loadFromConfig();
+      hopperMicroschedulerService.start();
     }
     if (particleLimitService != null) {
       particleLimitService.loadFromConfig();
