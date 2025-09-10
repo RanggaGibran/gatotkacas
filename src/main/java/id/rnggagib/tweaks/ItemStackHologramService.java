@@ -6,12 +6,17 @@ import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.Chunk;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.slf4j.Logger;
 import org.bukkit.util.Vector;
+import org.bukkit.event.Listener;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.world.ChunkLoadEvent;
+import org.bukkit.event.HandlerList;
 
 import java.util.*;
 import id.rnggagib.util.EntityUtils;
@@ -19,7 +24,7 @@ import id.rnggagib.util.EntityUtils;
 /**
  * Visual item stacking with modern hologram and timed auto-clear to reduce lag.
  */
-public final class ItemStackHologramService {
+public final class ItemStackHologramService implements Listener {
     private final Plugin plugin;
     private final Logger logger;
     private int taskId = -1;
@@ -29,6 +34,7 @@ public final class ItemStackHologramService {
     private static final float HOLO_VIEW_RANGE = 24.0f;        // default text display view range
     private static final double PULL_MAX_SPEED = 0.7;          // clamp speed for pulled items
     private static final double PULL_TELEPORT_Y_OFFSET = 0.05; // slight offset when snap-teleporting
+    private static final String HOLO_TAG = "gtk_item_holo";
 
     // Config
     private boolean enabled;
@@ -72,6 +78,7 @@ public final class ItemStackHologramService {
     public void start() {
         stop();
         if (!enabled) { logger.info("Item stacks disabled"); return; }
+    Bukkit.getPluginManager().registerEvents(this, plugin);
         taskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, this::tick, periodTicks, periodTicks);
         logger.info("Item stacks enabled (r={} blocks, ttl={}s)", radius, lifetimeSeconds);
     }
@@ -81,6 +88,7 @@ public final class ItemStackHologramService {
             Bukkit.getScheduler().cancelTask(taskId);
             taskId = -1;
         }
+    HandlerList.unregisterAll(this);
         // Cleanup holograms
         for (var e : leaderToHolo.entrySet()) {
             var holo = EntityUtils.findTextDisplay(e.getValue());
@@ -244,6 +252,9 @@ public final class ItemStackHologramService {
     private TextDisplay ensureHolo(World w, Item leader, UUID leaderId) {
         UUID hid = leaderToHolo.get(leaderId);
         TextDisplay td = hid != null ? EntityUtils.findTextDisplay(hid) : null;
+        // If we have a known hologram UUID but cannot currently resolve it (likely chunk unloaded),
+        // do NOT spawn a new one to avoid duplicates. We'll resume updating once it loads back.
+        if (hid != null && td == null) return null;
         if (td != null && td.isValid() && !td.isDead()) return td;
         var loc = leader.getLocation().add(0, HOLO_Y_OFFSET, 0);
         td = w.spawn(loc, TextDisplay.class, d -> {
@@ -260,6 +271,7 @@ public final class ItemStackHologramService {
             try { d.setLineWidth(holoLineWidth); } catch (Throwable ignored) {}
             try { d.setBackgroundColor(Color.fromARGB(holoBgAlpha, 0, 0, 0)); } catch (Throwable ignored) {}
             if (holoFullBright) { try { d.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15)); } catch (Throwable ignored) {} }
+            try { d.addScoreboardTag(HOLO_TAG); } catch (Throwable ignored) {}
         });
         leaderToHolo.put(leaderId, td.getUniqueId());
         return td;
@@ -296,5 +308,42 @@ public final class ItemStackHologramService {
             removeHolo(leaderId);
             leaderExpiresAt.remove(leaderId);
         }
+    }
+
+    @EventHandler
+    public void onChunkLoad(ChunkLoadEvent e) {
+        // Remove any stray item holograms in this chunk that are not tracked in leaderToHolo
+        Chunk ch = e.getChunk();
+        var trackedHoloIds = new java.util.HashSet<>(leaderToHolo.values());
+        var presentHoloIds = new java.util.HashSet<java.util.UUID>();
+        for (var ent : ch.getEntities()) {
+            if (ent instanceof TextDisplay td) {
+                try {
+                    if (td.getScoreboardTags().contains(HOLO_TAG)) {
+                        presentHoloIds.add(td.getUniqueId());
+                        if (!trackedHoloIds.contains(td.getUniqueId())) {
+                            // Stray, not tracked
+                            td.remove();
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
+        // If a leader's hologram UUID is missing in this chunk but the leader item is here, clear mapping so we can respawn
+        var toClear = new java.util.ArrayList<java.util.UUID>();
+        for (var entry : leaderToHolo.entrySet()) {
+            var leaderId = entry.getKey();
+            var holoId = entry.getValue();
+            if (presentHoloIds.contains(holoId)) continue;
+            var item = EntityUtils.findItem(leaderId);
+            if (item == null || !item.isValid() || item.isDead()) { toClear.add(leaderId); continue; }
+            try {
+                var leaderChunk = item.getLocation().getChunk();
+                if (leaderChunk.getX() == ch.getX() && leaderChunk.getZ() == ch.getZ() && leaderChunk.getWorld().equals(ch.getWorld())) {
+                    toClear.add(leaderId);
+                }
+            } catch (Throwable ignored) {}
+        }
+        for (var lid : toClear) { leaderToHolo.remove(lid); }
     }
 }

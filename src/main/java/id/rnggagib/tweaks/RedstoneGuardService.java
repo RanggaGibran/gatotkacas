@@ -5,6 +5,7 @@ import org.bukkit.Chunk;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockRedstoneEvent;
+import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.Plugin;
 import org.slf4j.Logger;
 import org.bukkit.Location;
@@ -204,7 +205,14 @@ public final class RedstoneGuardService implements Listener {
         "\n<white>Laporkan ke admin jika ini mengganggu farm</white>";
         // If one already exists for this chunk, refresh it instead of spawning a new one
         java.util.UUID existingId = notifEntity.get(key);
-    TextDisplay existing = existingId != null ? EntityUtils.findTextDisplay(existingId) : null;
+        TextDisplay existing = existingId != null ? EntityUtils.findTextDisplay(existingId) : null;
+        // If we know the hologram UUID but it's not currently loaded, avoid spawning a duplicate
+        if (existingId != null && existing == null) {
+            lastNotifAtMillis.put(key, now);
+            notifAnchor.put(key, anchor.clone());
+            notifBase.put(key, base);
+            return;
+        }
         if (existing != null && !existing.isDead()) {
             // rate limit text updates to avoid spammy edits
             long lastUpdateTick = lastTextUpdateTick.getOrDefault(key, -999999L);
@@ -285,6 +293,35 @@ public final class RedstoneGuardService implements Listener {
             // Keep the hologram anchored at spawn location
             Location anchor = notifAnchor.get(key);
             if (anchor != null) td.teleport(anchor);
+        }
+    }
+
+    @EventHandler
+    public void onChunkLoad(ChunkLoadEvent e) {
+        // Clean up stray redstone holograms in this chunk that are no longer tracked
+        Chunk ch = e.getChunk();
+        var trackedIds = new java.util.HashSet<>(notifEntity.values());
+        for (var ent : ch.getEntities()) {
+            if (ent instanceof TextDisplay td) {
+                // We did not tag these displays; rely on tracking map only
+                if (!trackedIds.contains(td.getUniqueId())) continue;
+                // Tracked ones are fine; skip removal here
+            }
+        }
+        // If a tracked hologram UUID in this chunk isn't actually present, drop mapping so we can respawn on next event
+        var toDrop = new java.util.ArrayList<Long>();
+        for (var entry : notifEntity.entrySet()) {
+            var id = entry.getValue();
+            var td = EntityUtils.findTextDisplay(id);
+            if (td == null) {
+                toDrop.add(entry.getKey());
+            }
+        }
+        for (var key : toDrop) {
+            notifEntity.remove(key);
+            notifAnchor.remove(key);
+            notifBase.remove(key);
+            lastTextUpdateTick.remove(key);
         }
     }
 
