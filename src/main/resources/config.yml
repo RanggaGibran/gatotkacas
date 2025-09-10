@@ -19,8 +19,8 @@ features:
     library: ""
     auto-download:
       enabled: true
-      url: "https://github.com/RanggaGibran/gatotkacas/releases/download/v0.1.1/culling_rs-linux-x86_64.so"
-      sha256: "9f03e31260e94fe2c0551009fe0bfe91651c7eb82881082cd2d620921a6c931f"
+      url: "https://github.com/RanggaGibran/gatotkacas/releases/download/v0.1.2/culling_rs-linux-x86_64.so"
+      sha256: "4b5dcd6ebff55cc15beac587e7ccbd8d0b421ca7064c4b4785423945b848f858"
       # Optional per-OS URLs (picked automatically when url is empty)
       per-os:
         windows:
