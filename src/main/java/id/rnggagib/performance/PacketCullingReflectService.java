@@ -214,6 +214,19 @@ public final class PacketCullingReflectService {
                         double dy = y - vloc.getY();
                         double dz = z - vloc.getZ();
                         double distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+                        // Citizens NPC exemption: if the target entity at this location has metadata "NPC", skip culling.
+                        try {
+                            org.bukkit.World w = viewer.getWorld();
+                            // Search small radius for an entity with metadata NPC near the spawn position
+                            for (org.bukkit.entity.Entity nearby : w.getNearbyEntities(new org.bukkit.Location(w, x, y, z), 0.75, 0.75, 0.75)) {
+                                if (nearby.hasMetadata("NPC")) {
+                                    java.util.List<org.bukkit.metadata.MetadataValue> mv = nearby.getMetadata("NPC");
+                                    boolean npc = false; for (var m : mv) { if (m != null && m.asBoolean()) { npc = true; break; } }
+                                    if (npc) { return null; }
+                                }
+                            }
+                        } catch (Throwable ignored) {}
                         var dir = new org.bukkit.util.Vector(dx, dy, dz);
                         if (dir.lengthSquared() > 1e-9) dir.normalize();
                         var view = vloc.getDirection().normalize();

@@ -6,6 +6,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.metadata.MetadataValue;
 import org.bukkit.plugin.Plugin;
 import org.slf4j.Logger;
 
@@ -280,6 +281,7 @@ public final class CullingService {
                     if (!e.getWorld().getName().equals(wname)) continue;
                     UUID id = e.getUniqueId();
                     if (seen.contains(id)) continue; // de-dup across players
+                    if (isNpc(e)) continue; // skip Citizens NPCs entirely
                     var typeName = e.getType().name();
                     if (!whitelist.isEmpty() && !whitelist.contains(typeName)) continue;
                     if (blacklist.contains(typeName)) continue;
@@ -302,6 +304,18 @@ public final class CullingService {
         }
         if (entities.isEmpty() || playersByWorld.isEmpty()) return new Snapshot(java.util.Map.of(), java.util.List.of());
         return new Snapshot(playersByWorld, entities);
+    }
+
+    private boolean isNpc(Entity e) {
+        try {
+            // Citizens convention: metadata key "NPC"
+            if (e.hasMetadata("NPC")) {
+                for (MetadataValue mv : e.getMetadata("NPC")) {
+                    if (mv != null && mv.asBoolean()) return true;
+                }
+            }
+        } catch (Throwable ignored) {}
+        return false;
     }
 
     private ComputationResult compute(Snapshot snap) {
