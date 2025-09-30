@@ -207,6 +207,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
 
   // Optional packet-level culling via ProtocolLib (reflection)
   packetCullingService = new PacketCullingReflectService(this, getSLF4JLogger(), cullingService);
+  packetCullingService.setTickMonitor(tickMonitor);
   packetCullingService.loadFromConfig();
   packetCullingService.start();
 
@@ -370,6 +371,19 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
         .append("\n");
     } else {
       sb.append("<yellow><bold>Spawn/AI</bold></yellow>\n  <red>disabled</red>\n");
+    }
+
+    sb.append("<yellow><bold>Packets</bold></yellow>\n");
+    if (packetCullingService != null && packetCullingService.isBudgetEnabled()) {
+      sb.append("  <green>budget</green> limit=<yellow>")
+        .append(packetCullingService.currentBudgetLimit())
+        .append("</yellow>");
+      if (packetCullingService.isBudgetDynamicEnabled()) {
+        sb.append(" <gray>(dynamic)</gray>");
+      }
+      sb.append("\n");
+    } else {
+      sb.append("  <red>budget disabled</red>\n");
     }
 
     return sb.toString();

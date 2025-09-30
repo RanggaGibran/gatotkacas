@@ -65,17 +65,24 @@ features:
   # Cancel spawn packets for culled entities (requires ProtocolLib on server)
   packet-culling:
     enabled: true
-
-  # Client-side particle limiter via GUI (/plimit)
-  particle-limit:
-    enabled: true
-    exclude-types: ["PLAYER", "ARMOR_STAND"]
     budget:
       enabled: true
       max-spawns-per-tick: 20     # per-player spawn packets allowed each tick
       always-send-within: 12.0    # always allow if within this distance to player
       queue-cap: 256              # per-player queued spawn packets cap; drop farthest when full
       queue-ttl-ticks: 100        # drop queued packets older than this
+      dynamic:
+        enabled: true             # auto-adjust per-player cap based on MSPT
+        fast-mspt: 32.0           # if avg MSPT <= fast-mspt use fast-per-tick
+        fast-per-tick: 40         # generous cap when server is healthy
+        slow-mspt: 48.0           # if avg MSPT >= slow-mspt use slow-per-tick
+        slow-per-tick: 12         # tighter cap when server is lagging
+        smoothing-ticks: 10       # ticks for exponential smoothing between targets
+
+  # Client-side particle limiter via GUI (/plimit)
+  particle-limit:
+    enabled: true
+    exclude-types: ["PLAYER", "ARMOR_STAND"]
 
   # Visual item stack holograms with countdown auto-clear
   item-stacks:
@@ -93,11 +100,11 @@ features:
     # Velocity impulse magnitude applied per tick toward leader (blocks/tick)
     pull-strength: 0.22
     # If within this distance to leader, snap-teleport to leader to force merge
-  pull-teleport-distance: 0.35
-  # Hologram readability options
-  holo-full-bright: true
-  holo-background-alpha: 170
-  holo-line-width: 180
+    pull-teleport-distance: 0.35
+    # Hologram readability options
+    holo-full-bright: true
+    holo-background-alpha: 170
+    holo-line-width: 180
 
   # Adapt view/simulation distance based on MSPT
   adaptive-distance:
@@ -126,15 +133,15 @@ features:
       # how long the hologram stays (seconds)
       ttl-seconds: 300
       # per-chunk cooldown before showing another hologram (seconds)
-  cooldown-seconds: 120
-  # visual tweaks for readability
-  full-bright: true           # force max brightness so text is bright at night/shade
-  background-alpha: 190       # 0-255 alpha for dark background rectangle
-  line-width: 240             # pixels before wrapping; higher = fewer wraps
-  # safety limits
-  max-active: 64              # global cap of active redstone holograms
-  replace-oldest-when-full: false  # if true, evict the oldest when at cap; otherwise skip
-  min-update-interval-ticks: 20    # rate-limit text refresh when spammed by the same chunk
+      cooldown-seconds: 120
+    # visual tweaks for readability
+    full-bright: true           # force max brightness so text is bright at night/shade
+    background-alpha: 190       # 0-255 alpha for dark background rectangle
+    line-width: 240             # pixels before wrapping; higher = fewer wraps
+    # safety limits
+    max-active: 64              # global cap of active redstone holograms
+    replace-oldest-when-full: false  # if true, evict the oldest when at cap; otherwise skip
+    min-update-interval-ticks: 20    # rate-limit text refresh when spammed by the same chunk
 
   # Skip creature spawns when no nearby players
   spawn-throttle:

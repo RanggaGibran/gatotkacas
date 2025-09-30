@@ -1,9 +1,11 @@
 package id.rnggagib.performance;
 
+import id.rnggagib.monitor.TickMonitor;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.slf4j.Logger;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.InvocationHandler;
@@ -19,13 +21,24 @@ public final class PacketCullingReflectService {
     private final Plugin plugin;
     private final Logger logger;
     private final CullingService culling;
+    private @Nullable TickMonitor tickMonitor;
     private boolean enabled;
     // Budget config
     private boolean budgetEnabled;
-    private int budgetMaxPerTick;
+    private int budgetBaseMaxPerTick;
     private double budgetAlwaysSendWithin;
     private int budgetQueueCap;
     private int budgetQueueTtlTicks;
+    private boolean budgetDynamicEnabled;
+    private double budgetDynamicFastMspt;
+    private int budgetDynamicFastPerTick;
+    private double budgetDynamicSlowMspt;
+    private int budgetDynamicSlowPerTick;
+    private int budgetDynamicMinPerTick;
+    private int budgetDynamicMaxPerTick;
+    private int budgetDynamicSmoothingTicks;
+    private double budgetDynamicSmoothed = -1.0;
+    private volatile int budgetMaxPerTickEffective;
     // kept for future use if we decode entity type from packet
     // private Set<String> excludeTypes = Set.of("PLAYER", "ARMOR_STAND");
     private Object protocolManager; // com.comphenix.protocol.ProtocolManager
@@ -57,16 +70,85 @@ public final class PacketCullingReflectService {
         this.culling = culling;
     }
 
+    public void setTickMonitor(@Nullable TickMonitor tickMonitor) {
+        this.tickMonitor = tickMonitor;
+    }
+
+    public int currentBudgetLimit() {
+        return budgetMaxPerTickEffective;
+    }
+
+    public boolean isBudgetDynamicEnabled() {
+        return budgetEnabled && budgetDynamicEnabled;
+    }
+
+    public boolean isBudgetEnabled() {
+        return budgetEnabled;
+    }
+
+    private int computeDynamicBudget(double mspt) {
+        if (!budgetDynamicEnabled) return budgetBaseMaxPerTick;
+        if (budgetDynamicSlowMspt <= budgetDynamicFastMspt + 1e-6) {
+            return Math.max(1, Math.min(budgetDynamicMaxPerTick, Math.max(budgetDynamicMinPerTick, budgetDynamicSlowPerTick)));
+        }
+        double t = (mspt - budgetDynamicFastMspt) / (budgetDynamicSlowMspt - budgetDynamicFastMspt);
+        t = Math.max(0.0, Math.min(1.0, t));
+        double target = budgetDynamicFastPerTick + t * (budgetDynamicSlowPerTick - budgetDynamicFastPerTick);
+        int rounded = (int) Math.round(target);
+        if (rounded < budgetDynamicMinPerTick) rounded = budgetDynamicMinPerTick;
+        if (rounded > budgetDynamicMaxPerTick) rounded = budgetDynamicMaxPerTick;
+        return Math.max(1, rounded);
+    }
+
+    private void recalcEffectiveBudget() {
+        int target = budgetBaseMaxPerTick;
+        if (budgetDynamicEnabled && tickMonitor != null) {
+            try {
+                double mspt = tickMonitor.avgMspt();
+                target = computeDynamicBudget(mspt);
+            } catch (Throwable ignored) {}
+        }
+        if (budgetDynamicSmoothed < 0) {
+            budgetDynamicSmoothed = target;
+        } else {
+            double alpha = 1.0 / (double) budgetDynamicSmoothingTicks;
+            if (alpha < 0) alpha = 0;
+            if (alpha > 1) alpha = 1;
+            budgetDynamicSmoothed += (target - budgetDynamicSmoothed) * alpha;
+        }
+        int effective = (int) Math.round(budgetDynamicSmoothed);
+        if (effective < 1) effective = 1;
+        if (effective < budgetDynamicMinPerTick) effective = budgetDynamicMinPerTick;
+        if (effective > budgetDynamicMaxPerTick) effective = budgetDynamicMaxPerTick;
+        budgetMaxPerTickEffective = effective;
+    }
+
     public void loadFromConfig() {
         var cfg = plugin.getConfig();
         enabled = cfg.getBoolean("features.packet-culling.enabled", false);
-    // Budget
-    budgetEnabled = cfg.getBoolean("features.packet-culling.budget.enabled", false);
-    budgetMaxPerTick = Math.max(1, cfg.getInt("features.packet-culling.budget.max-spawns-per-tick", 20));
-    budgetAlwaysSendWithin = Math.max(0.0, cfg.getDouble("features.packet-culling.budget.always-send-within", 12.0));
-    budgetQueueCap = Math.max(8, cfg.getInt("features.packet-culling.budget.queue-cap", 256));
-    budgetQueueTtlTicks = Math.max(20, cfg.getInt("features.packet-culling.budget.queue-ttl-ticks", 100));
-    // Exclude types configurable for future packet type decoding; currently unused in reflection mode
+        // Budget
+        budgetEnabled = cfg.getBoolean("features.packet-culling.budget.enabled", false);
+        budgetBaseMaxPerTick = Math.max(1, cfg.getInt("features.packet-culling.budget.max-spawns-per-tick", 20));
+        budgetAlwaysSendWithin = Math.max(0.0, cfg.getDouble("features.packet-culling.budget.always-send-within", 12.0));
+        budgetQueueCap = Math.max(8, cfg.getInt("features.packet-culling.budget.queue-cap", 256));
+        budgetQueueTtlTicks = Math.max(20, cfg.getInt("features.packet-culling.budget.queue-ttl-ticks", 100));
+        budgetDynamicEnabled = cfg.getBoolean("features.packet-culling.budget.dynamic.enabled", false);
+        budgetDynamicFastMspt = cfg.getDouble("features.packet-culling.budget.dynamic.fast-mspt", 32.0);
+        budgetDynamicFastPerTick = Math.max(1, cfg.getInt("features.packet-culling.budget.dynamic.fast-per-tick", Math.max(20, budgetBaseMaxPerTick)));
+    budgetDynamicSlowMspt = cfg.getDouble("features.packet-culling.budget.dynamic.slow-mspt", 48.0);
+    int slowDefault = Math.max(6, Math.min(budgetBaseMaxPerTick, 12));
+    budgetDynamicSlowPerTick = Math.max(1, cfg.getInt("features.packet-culling.budget.dynamic.slow-per-tick", slowDefault));
+        budgetDynamicMinPerTick = Math.max(1, Math.min(budgetDynamicFastPerTick, budgetDynamicSlowPerTick));
+        budgetDynamicMaxPerTick = Math.max(budgetDynamicFastPerTick, budgetDynamicSlowPerTick);
+        budgetDynamicSmoothingTicks = Math.max(1, cfg.getInt("features.packet-culling.budget.dynamic.smoothing-ticks", 10));
+        if (!budgetDynamicEnabled) {
+            budgetDynamicMinPerTick = budgetBaseMaxPerTick;
+            budgetDynamicMaxPerTick = budgetBaseMaxPerTick;
+            budgetDynamicSmoothingTicks = 1;
+        }
+        budgetDynamicSmoothed = -1.0;
+        budgetMaxPerTickEffective = budgetBaseMaxPerTick;
+        // Exclude types configurable for future packet type decoding; currently unused in reflection mode
     }
 
     public void start() {
@@ -250,10 +332,12 @@ public final class PacketCullingReflectService {
 
                         // Budget check (applies only when we can re-send later)
                         if (budgetEnabled && sendServerPacketMethod != null && !shouldCull) {
+                            int limit = budgetMaxPerTickEffective;
+                            if (limit < 1) limit = 1;
                             if (distance > budgetAlwaysSendWithin) {
                                 java.util.UUID pid = viewer.getUniqueId();
                                 int used; synchronized (sentThisTick) { used = sentThisTick.getOrDefault(pid, 0); }
-                                if (used >= budgetMaxPerTick) {
+                                if (used >= limit) {
                                     // enqueue and cancel
                                     Object copy = container;
                                     try {
@@ -275,12 +359,17 @@ public final class PacketCullingReflectService {
                                     packetEventCls.getMethod("setCancelled", boolean.class).invoke(packetEvent, true);
                                     return null;
                                 } else {
-                                    synchronized (sentThisTick) { sentThisTick.put(pid, used + 1); }
+                                    int next = used + 1;
+                                    if (next > limit) next = limit;
+                                    synchronized (sentThisTick) { sentThisTick.put(pid, next); }
                                 }
                             } else {
                                 // within always-send range: bypass budget but still count a bit to avoid abuse
                                 java.util.UUID pid = viewer.getUniqueId();
-                                int used; synchronized (sentThisTick) { used = sentThisTick.getOrDefault(pid, 0); sentThisTick.put(pid, used + 1); }
+                                int used; synchronized (sentThisTick) { used = sentThisTick.getOrDefault(pid, 0); }
+                                int next = used + 1;
+                                if (next > limit) next = limit;
+                                synchronized (sentThisTick) { sentThisTick.put(pid, next); }
                             }
                         }
 
@@ -301,8 +390,10 @@ public final class PacketCullingReflectService {
             logger.info("Packet culling enabled ({} packet type(s)){}", java.lang.Integer.valueOf(supported.size()), budgetEnabled ? " with per-player budget" : "");
 
             // Tick task to advance time and drain queues
+            recalcEffectiveBudget();
             drainTask = org.bukkit.Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
                 tickNow++;
+                recalcEffectiveBudget();
                 // Reset counters each tick
                 synchronized (sentThisTick) { sentThisTick.clear(); }
                 if (!budgetEnabled || sendServerPacketMethod == null) return;
@@ -313,9 +404,10 @@ public final class PacketCullingReflectService {
                         Player p = org.bukkit.Bukkit.getPlayer(pid);
                         if (p == null || !p.isOnline()) { dq.clear(); continue; }
                         int sent = 0;
+                        int limit = budgetMaxPerTickEffective;
                         // Drop expired
                         dq.removeIf(q -> (tickNow - q.tick) > budgetQueueTtlTicks);
-                        while (!dq.isEmpty() && sent < budgetMaxPerTick) {
+                        while (!dq.isEmpty() && sent < limit) {
                             // pick nearest first to feel responsive
                             Queued best = null;
                             for (Queued q : dq) { if (best == null || q.dist < best.dist) { best = q; } }
