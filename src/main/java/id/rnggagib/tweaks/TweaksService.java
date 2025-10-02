@@ -44,6 +44,10 @@ public final class TweaksService implements Listener {
         enabled = cfg.getBoolean("tweaks.enabled", true);
         hopperThrottleEnabled = cfg.getBoolean("tweaks.hopper.throttle-enabled", false);
         hopperIntervalTicks = cfg.getInt("tweaks.hopper.interval-ticks", 8);
+        if (hopperThrottleEnabled && cfg.getBoolean("features.hopper-microscheduler.enabled", false)) {
+            hopperThrottleEnabled = false;
+            logger.info("Disabling tweaks.hopper throttle because hopper-microscheduler is enabled (use one or the other).");
+        }
         itemMergeEnabled = cfg.getBoolean("tweaks.item.aggressive-merge-enabled", false);
         itemMergeRadius = cfg.getDouble("tweaks.item.merge-radius", 1.5);
         itemMergeMaxPerTick = cfg.getInt("tweaks.item.max-merge-per-tick", 128);

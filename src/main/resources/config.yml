@@ -184,7 +184,7 @@ features:
 tweaks:
   enabled: true
   hopper:
-    throttle-enabled: true
+    throttle-enabled: false      # legacy simple throttle; auto-disabled when hopper-microscheduler is enabled
     interval-ticks: 8
   item:
     aggressive-merge-enabled: true
