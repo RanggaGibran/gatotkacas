@@ -11,6 +11,7 @@ import id.rnggagib.tweaks.RedstoneGuardService;
 import id.rnggagib.performance.PacketCullingReflectService;
 import id.rnggagib.tweaks.ItemStackHologramService;
 import id.rnggagib.tweaks.SweeperService;
+import id.rnggagib.tweaks.AntiGhostBlockService;
 import id.rnggagib.tweaks.HopperMicroschedulerService;
 import id.rnggagib.ui.ParticleLimitService;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -32,6 +33,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   private PacketCullingReflectService packetCullingService;
   private ItemStackHologramService itemStackHologramService;
   private SweeperService sweeperService;
+  private AntiGhostBlockService antiGhostBlockService;
   private HopperMicroschedulerService hopperMicroschedulerService;
   private ParticleLimitService particleLimitService;
   private Metrics bstats;
@@ -153,6 +155,10 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   sweeperService.loadFromConfig();
   sweeperService.start();
 
+  antiGhostBlockService = new AntiGhostBlockService(this, getSLF4JLogger());
+  antiGhostBlockService.loadFromConfig();
+  antiGhostBlockService.start();
+
   // Hopper microscheduler
   hopperMicroschedulerService = new HopperMicroschedulerService(this, getSLF4JLogger());
   hopperMicroschedulerService.loadFromConfig();
@@ -225,6 +231,7 @@ public class Plugin extends JavaPlugin implements GatotkacasCommand.Reloadable {
   if (packetCullingService != null) packetCullingService.stop();
   if (itemStackHologramService != null) itemStackHologramService.stop();
   if (sweeperService != null) sweeperService.stop();
+  if (antiGhostBlockService != null) antiGhostBlockService.stop();
   if (hopperMicroschedulerService != null) hopperMicroschedulerService.stop();
   if (particleLimitService != null) particleLimitService.stop();
     getSLF4JLogger().info("gatotkacas disabled");

@@ -184,6 +184,13 @@ features:
       max-per-chunk: 96         # hard cap per chunk
       max-remove-per-tick: 128  # safety processing cap per run
 
+  # Block update resync to mitigate cobblestone ghost blocks
+  anti-ghost-block:
+    enabled: true
+    resend-delay-ticks: 2        # ticks after break/place/form before sending block update
+    player-radius: 12.0          # radius around the block to refresh for players
+    materials: ["COBBLESTONE", "STONE", "BASALT", "SMOOTH_BASALT", "NETHER_GOLD_ORE"]
+
   # Hopper microscheduler (token bucket per grid)
   hopper-microscheduler:
     enabled: true
