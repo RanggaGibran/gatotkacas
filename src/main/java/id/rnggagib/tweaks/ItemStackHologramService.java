@@ -15,7 +15,12 @@ import org.slf4j.Logger;
 import org.bukkit.util.Vector;
 import org.bukkit.event.Listener;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.entity.ItemDespawnEvent;
+import org.bukkit.event.entity.ItemMergeEvent;
+import org.bukkit.event.inventory.InventoryPickupItemEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
+import org.bukkit.event.world.ChunkUnloadEvent;
 import org.bukkit.event.HandlerList;
 
 import java.util.*;
@@ -151,8 +156,7 @@ public final class ItemStackHologramService implements Listener {
                 for (var it : group) {
                     UUID mid = it.getUniqueId();
                     if (!mid.equals(leaderId) && leaderToHolo.containsKey(mid)) {
-                        removeHolo(mid);
-                        leaderExpiresAt.remove(mid);
+                        cleanupLeader(mid);
                     }
                 }
 
@@ -161,8 +165,7 @@ public final class ItemStackHologramService implements Listener {
                 if (now >= clearAt) {
                     // Clear entire group
                     for (var it : group) { if (it.isValid() && !it.isDead()) it.remove(); }
-                    removeHolo(leaderId);
-                    leaderExpiresAt.remove(leaderId);
+                    cleanupLeader(leaderId);
                     continue;
                 } else {
                     if (!leaderExpiresAt.containsKey(leaderId)) clearAt = now + lifetimeSeconds * 1000L;
@@ -218,9 +221,7 @@ public final class ItemStackHologramService implements Listener {
             }
         }
         for (UUID lid : vanished) {
-            removeHolo(lid);
-            leaderExpiresAt.remove(lid);
-            leaderToHolo.remove(lid);
+            cleanupLeader(lid);
         }
 
         // Retire holograms for leaders not active this tick (e.g., leadership changed)
@@ -230,9 +231,7 @@ public final class ItemStackHologramService implements Listener {
                 if (!activeLeaders.contains(lid)) toRemove.add(lid);
             }
             for (var id : toRemove) {
-                removeHolo(id);
-                leaderExpiresAt.remove(id);
-                leaderToHolo.remove(id);
+                cleanupLeader(id);
             }
         }
     }
@@ -277,14 +276,6 @@ public final class ItemStackHologramService implements Listener {
         return td;
     }
 
-    private void removeHolo(UUID leaderId) {
-        UUID hid = leaderToHolo.remove(leaderId);
-        if (hid != null) {
-            var td = EntityUtils.findTextDisplay(hid);
-            if (td != null && !td.isDead()) td.remove();
-        }
-    }
-
     private Component formatText(Material mat, int count, int secs) {
         String nice = toNiceName(mat);
     String mm = "<white>" + nice + "</white> <yellow>x" + count + "</yellow> <white>[" + secs + "]</white>";
@@ -305,8 +296,20 @@ public final class ItemStackHologramService implements Listener {
 
     private void cleanupIfLeader(UUID leaderId) {
         if (leaderToHolo.containsKey(leaderId)) {
-            removeHolo(leaderId);
-            leaderExpiresAt.remove(leaderId);
+            cleanupLeader(leaderId);
+        }
+    }
+
+    private void cleanupLeader(UUID leaderId) {
+        removeHolo(leaderId);
+        leaderExpiresAt.remove(leaderId);
+    }
+
+    private void removeHolo(UUID leaderId) {
+        UUID hid = leaderToHolo.remove(leaderId);
+        if (hid != null) {
+            var td = EntityUtils.findTextDisplay(hid);
+            if (td != null && !td.isDead()) td.remove();
         }
     }
 
@@ -345,5 +348,59 @@ public final class ItemStackHologramService implements Listener {
             } catch (Throwable ignored) {}
         }
         for (var lid : toClear) { leaderToHolo.remove(lid); }
+    }
+
+    @EventHandler
+    public void onChunkUnload(ChunkUnloadEvent e) {
+        Chunk ch = e.getChunk();
+        // remove holograms in this chunk immediately to avoid stranded displays
+        for (var ent : ch.getEntities()) {
+            if (ent instanceof TextDisplay td) {
+                try {
+                    if (td.getScoreboardTags().contains(HOLO_TAG)) {
+                        td.remove();
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        var toClear = new ArrayList<UUID>();
+        for (var entry : leaderToHolo.entrySet()) {
+            UUID leaderId = entry.getKey();
+            var item = EntityUtils.findItem(leaderId);
+            if (item == null || !item.isValid() || item.isDead()) {
+                toClear.add(leaderId);
+                continue;
+            }
+            try {
+                var leaderChunk = item.getLocation().getChunk();
+                if (leaderChunk.getX() == ch.getX() && leaderChunk.getZ() == ch.getZ() && leaderChunk.getWorld().equals(ch.getWorld())) {
+                    toClear.add(leaderId);
+                }
+            } catch (Throwable ignored) {}
+        }
+        for (var lid : toClear) {
+            cleanupLeader(lid);
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onItemPickup(EntityPickupItemEvent e) {
+        cleanupLeader(e.getItem().getUniqueId());
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onItemMerge(ItemMergeEvent e) {
+        cleanupLeader(e.getEntity().getUniqueId());
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onItemDespawn(ItemDespawnEvent e) {
+        cleanupLeader(e.getEntity().getUniqueId());
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onInventoryPickup(InventoryPickupItemEvent e) {
+        cleanupLeader(e.getItem().getUniqueId());
     }
 }

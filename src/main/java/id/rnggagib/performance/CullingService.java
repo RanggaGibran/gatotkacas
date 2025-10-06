@@ -15,6 +15,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.Locale;
 
 /**
  * Toggleable entity culling module, safe on main thread.
@@ -72,6 +73,13 @@ public final class CullingService {
     // Filters
     private java.util.Set<String> whitelist = java.util.Set.of();
     private java.util.Set<String> blacklist = java.util.Set.of();
+    private static final java.util.Set<String> DEFAULT_PROTECTED_TYPES = java.util.Set.of(
+        "VILLAGER", "ZOMBIE_VILLAGER", "WANDERING_TRADER",
+        "BOAT", "CHEST_BOAT",
+        "MINECART", "CHEST_MINECART", "HOPPER_MINECART", "FURNACE_MINECART",
+        "TNT_MINECART", "COMMAND_BLOCK_MINECART", "SPAWNER_MINECART"
+    );
+    private java.util.Set<String> protectedTypes = new java.util.HashSet<>(DEFAULT_PROTECTED_TYPES);
 
     public CullingService(Plugin plugin, Logger logger, NativeBridge nativeBridge) {
         this.plugin = plugin;
@@ -103,9 +111,9 @@ public final class CullingService {
     var winc = cfg.getStringList("features.culling.worlds-include");
     var wexc = cfg.getStringList("features.culling.worlds-exclude");
     whitelist = new java.util.HashSet<>();
-    for (var s : wl) whitelist.add(s.toUpperCase());
+    for (var s : wl) whitelist.add(s.toUpperCase(Locale.ROOT));
     blacklist = new java.util.HashSet<>();
-    for (var s : bl) blacklist.add(s.toUpperCase());
+    for (var s : bl) blacklist.add(s.toUpperCase(Locale.ROOT));
     worldsInclude = new java.util.HashSet<>(winc);
     worldsExclude = new java.util.HashSet<>(wexc);
 
@@ -124,7 +132,15 @@ public final class CullingService {
             double md = tt.getDouble(type + ".max-distance", maxDistance);
             double st = tt.getDouble(type + ".speed-threshold", speedThreshold);
             double ct = tt.getDouble(type + ".cos-angle-threshold", cosAngleThreshold);
-            typeThresholds.put(type.toUpperCase(), new TypeThreshold(md, st, ct));
+            typeThresholds.put(type.toUpperCase(Locale.ROOT), new TypeThreshold(md, st, ct));
+        }
+    }
+
+    protectedTypes = new java.util.HashSet<>(DEFAULT_PROTECTED_TYPES);
+    var pt = cfg.getStringList("features.culling.protected-types");
+    for (var s : pt) {
+        if (s != null && !s.isEmpty()) {
+            protectedTypes.add(s.toUpperCase(Locale.ROOT));
         }
     }
     }
@@ -283,6 +299,7 @@ public final class CullingService {
                     if (seen.contains(id)) continue; // de-dup across players
                     if (isNpc(e)) continue; // skip Citizens NPCs entirely
                     var typeName = e.getType().name();
+                    if (shouldSkipEntity(e, typeName)) continue;
                     if (!whitelist.isEmpty() && !whitelist.contains(typeName)) continue;
                     if (blacklist.contains(typeName)) continue;
                     // Optional chunk radius filter relative to this player
@@ -469,6 +486,19 @@ public final class CullingService {
             return base && cos < (cosAngleThreshold - 0.15);
         }
         return base;
+    }
+
+    public boolean isProtectedEntity(Entity entity) {
+        if (entity == null) return false;
+        return shouldSkipEntity(entity, entity.getType().name());
+    }
+
+    private boolean shouldSkipEntity(Entity e, String typeName) {
+        String type = typeName != null ? typeName.toUpperCase(Locale.ROOT) : "";
+        if (protectedTypes.contains(type)) return true;
+        if (e.getVehicle() != null) return true;
+        if (!e.getPassengers().isEmpty()) return true;
+        return false;
     }
 
     public int getLastCulledCount() {

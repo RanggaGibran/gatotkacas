@@ -61,6 +61,20 @@ features:
   #     speed-threshold: 0.05
   #     cos-angle-threshold: 0.25
   type-thresholds: {}
+  # Entities that should never be culled; always visible to all players
+  protected-types:
+    - VILLAGER
+    - ZOMBIE_VILLAGER
+    - WANDERING_TRADER
+    - BOAT
+    - CHEST_BOAT
+    - MINECART
+    - CHEST_MINECART
+    - HOPPER_MINECART
+    - FURNACE_MINECART
+    - TNT_MINECART
+    - COMMAND_BLOCK_MINECART
+    - SPAWNER_MINECART
 
   # Cancel spawn packets for culled entities (requires ProtocolLib on server)
   packet-culling:
@@ -179,6 +193,8 @@ features:
     player-radius: 64.0           # radius to consider player proximity
     coalesce-window-ticks: 5      # suppress repeated src->dst moves within this window
     max-burst: 8                  # cap stored tokens per cell
+    stall-bypass-attempts: 3      # allow hopper after this many consecutive stalls even if out of tokens
+    max-debt: 8                   # how far a cell can dip into negative tokens when bypassing stalls
 
 # Small server-side tweaks
 tweaks:

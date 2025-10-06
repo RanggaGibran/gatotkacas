@@ -47,14 +47,6 @@ public final class PacketCullingReflectService {
     private Class<?> packetContainerCls;
     private int drainTask = -1;
 
-    // Small LRU cache for recent (viewerId, x, y, z) decisions to avoid duplicate math
-    private final java.util.Map<Long, Boolean> decisionCache = new java.util.LinkedHashMap<>(256, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(java.util.Map.Entry<Long, Boolean> eldest) {
-            return size() > 512; // cap
-        }
-    };
-
     // Budget state
     private long tickNow = 0L;
     private final java.util.Map<java.util.UUID, Integer> sentThisTick = new java.util.HashMap<>();
@@ -307,6 +299,9 @@ public final class PacketCullingReflectService {
                                     boolean npc = false; for (var m : mv) { if (m != null && m.asBoolean()) { npc = true; break; } }
                                     if (npc) { return null; }
                                 }
+                                if (culling.isProtectedEntity(nearby)) {
+                                    return null;
+                                }
                             }
                         } catch (Throwable ignored) {}
                         var dir = new org.bukkit.util.Vector(dx, dy, dz);
@@ -316,19 +311,7 @@ public final class PacketCullingReflectService {
                         double speed = 0.0;
 
                         // Build a compact key: 24 bits per coord after quantization + 16 bits of viewer hash
-                        long key = 0L;
-                        try {
-                            int qx = (int) Math.round(x * 4.0); // quarter-block precision
-                            int qy = (int) Math.round(y * 4.0);
-                            int qz = (int) Math.round(z * 4.0);
-                            int vh = viewer.getUniqueId().hashCode() & 0xFFFF;
-                            key = (((long) (qx & 0xFFFFFF)) << 40) | (((long) (qy & 0xFFFFFF)) << 16) | ((long) (qz & 0xFFFF)) | (((long) vh) << 56);
-                        } catch (Throwable ignore) {}
-
-                        Boolean cached;
-                        synchronized (decisionCache) { cached = decisionCache.get(key); }
-                        boolean shouldCull = cached != null ? cached : culling.quickShouldCull(distance, speed, cos);
-                        if (cached == null) { synchronized (decisionCache) { decisionCache.put(key, shouldCull); } }
+                        boolean shouldCull = culling.quickShouldCull(distance, speed, cos);
 
                         // Budget check (applies only when we can re-send later)
                         if (budgetEnabled && sendServerPacketMethod != null && !shouldCull) {
@@ -338,26 +321,28 @@ public final class PacketCullingReflectService {
                                 java.util.UUID pid = viewer.getUniqueId();
                                 int used; synchronized (sentThisTick) { used = sentThisTick.getOrDefault(pid, 0); }
                                 if (used >= limit) {
-                                    // enqueue and cancel
-                                    Object copy = container;
-                                    try {
-                                        Method deepClone = packetContainerCls.getMethod("deepClone");
-                                        copy = deepClone.invoke(container);
-                                    } catch (Throwable __) {
-                                        try { Method shallow = packetContainerCls.getMethod("shallowClone"); copy = shallow.invoke(container); } catch (Throwable ___) { /* fallback to same ref */ }
-                                    }
+                                    boolean queued = false;
                                     synchronized (queuedByPlayer) {
                                         var dq = queuedByPlayer.computeIfAbsent(pid, k -> new java.util.ArrayDeque<Queued>());
-                                        dq.addLast(new Queued(copy, tickNow, distance));
-                                        // enforce cap: drop farthest when full
-                                        if (dq.size() > budgetQueueCap) {
-                                            // find farthest and remove it
-                                            Queued far = null; for (Queued q : dq) if (far == null || q.dist > far.dist) far = q;
-                                            if (far != null) dq.remove(far);
+                                        if (dq.size() < budgetQueueCap) {
+                                            Object copy = container;
+                                            try {
+                                                Method deepClone = packetContainerCls.getMethod("deepClone");
+                                                copy = deepClone.invoke(container);
+                                            } catch (Throwable __) {
+                                                try { Method shallow = packetContainerCls.getMethod("shallowClone"); copy = shallow.invoke(container); } catch (Throwable ___) { /* fallback to same ref */ }
+                                            }
+                                            dq.addLast(new Queued(copy, tickNow, distance));
+                                            queued = true;
                                         }
                                     }
-                                    packetEventCls.getMethod("setCancelled", boolean.class).invoke(packetEvent, true);
-                                    return null;
+                                    if (queued) {
+                                        packetEventCls.getMethod("setCancelled", boolean.class).invoke(packetEvent, true);
+                                        return null;
+                                    }
+                                    int next = used + 1;
+                                    if (next > limit) next = limit;
+                                    synchronized (sentThisTick) { sentThisTick.put(pid, next); }
                                 } else {
                                     int next = used + 1;
                                     if (next > limit) next = limit;
@@ -403,19 +388,26 @@ public final class PacketCullingReflectService {
                         var dq = entry.getValue();
                         Player p = org.bukkit.Bukkit.getPlayer(pid);
                         if (p == null || !p.isOnline()) { dq.clear(); continue; }
+                        if (budgetQueueTtlTicks > 0 && !dq.isEmpty()) {
+                            var iter = dq.iterator();
+                            while (iter.hasNext()) {
+                                Queued q = iter.next();
+                                if ((tickNow - q.tick) > budgetQueueTtlTicks) {
+                                    iter.remove();
+                                    try { sendServerPacketMethod.invoke(protocolManager, p, q.container); } catch (Throwable ignored) {}
+                                }
+                            }
+                        }
+                        if (dq.isEmpty()) { queuedByPlayer.remove(pid); continue; }
                         int sent = 0;
                         int limit = budgetMaxPerTickEffective;
-                        // Drop expired
-                        dq.removeIf(q -> (tickNow - q.tick) > budgetQueueTtlTicks);
+                        if (limit < 1) limit = 1;
                         while (!dq.isEmpty() && sent < limit) {
-                            // pick nearest first to feel responsive
                             Queued best = null;
                             for (Queued q : dq) { if (best == null || q.dist < best.dist) { best = q; } }
                             if (best == null) break;
-                            // remove by index from deque: fallback to remove(best)
                             boolean removed = dq.remove(best);
                             if (!removed) {
-                                // should not happen, but guard
                                 best = dq.pollFirst();
                                 if (best == null) break;
                             }
@@ -440,6 +432,6 @@ public final class PacketCullingReflectService {
             packetListener = null;
         }
         if (drainTask != -1) { org.bukkit.Bukkit.getScheduler().cancelTask(drainTask); drainTask = -1; }
-        queuedByPlayer.clear(); sentThisTick.clear(); decisionCache.clear();
+        queuedByPlayer.clear(); sentThisTick.clear();
     }
 }
